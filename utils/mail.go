@@ -19,7 +19,7 @@ type MailSender struct {
 }
 
 var (
-	mailContentType = "text/html; charset=UTF-8"
+	mailContentType = "text/plain; charset=UTF-8"
 	crlf            = "\r\n"
 )
 
