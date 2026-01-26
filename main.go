@@ -39,12 +39,14 @@ func defaultHolder(id string, conf config.BackupConfig) *TaskHolder {
 		nm.AddNotifier(notice.NewMailNotifier(&ms, config.Config.NoticeMail))
 	}
 
-	return &TaskHolder{
+	holder := &TaskHolder{
 		ID:            id,
 		conf:          conf,
 		ossClient:     CreateOSSClient(config.Config.OSS),
 		noticeManager: nm,
 	}
+	holder.initLogger()
+	return holder
 }
 
 func main() {
