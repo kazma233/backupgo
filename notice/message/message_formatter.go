@@ -40,33 +40,62 @@ func (f *SimpleTextFormatter) Format(taskID string, startTime time.Time, entries
 	duration := endTime.Sub(startTime)
 	fmt.Fprintf(&f.builder, "耗时: %s\n", FormatDuration(duration))
 
+	// 收集关键信息
+	var compressedSize string
+	var uploadInfos []string
+
 	for _, entry := range entries {
-		if entry.Type == LogEntryTypeInfo {
+		switch entry.EntryType {
+		case EntryTypeInfo:
+			// 提取压缩完成信息
 			if strings.Contains(entry.Message, "压缩完成") {
-				fmt.Fprintf(&f.builder, "%s\n", entry.Message)
+				compressedSize = entry.Message
 			}
+			// 提取上传信息
 			if strings.Contains(entry.Message, "bucket") {
-				fmt.Fprintf(&f.builder, "上传至: %s\n", entry.Message)
+				uploadInfos = append(uploadInfos, entry.Message)
 			}
 		}
 	}
 
-	if hasErrors(entries) {
-		for _, entry := range entries {
-			if entry.Type == LogEntryTypeError {
-				fmt.Fprintf(&f.builder, "错误: %s\n", entry.Message)
-				break
-			}
-		}
+	// 输出压缩信息
+	if compressedSize != "" {
+		fmt.Fprintf(&f.builder, "%s\n", compressedSize)
+	}
+
+	// 输出上传信息
+	for _, info := range uploadInfos {
+		fmt.Fprintf(&f.builder, "上传至: %s\n", info)
+	}
+
+	// 输出错误信息
+	if firstError := f.getFirstError(entries); firstError != "" {
+		fmt.Fprintf(&f.builder, "错误: %s\n", firstError)
 	}
 
 	return f.builder.String()
 }
 
+// getFirstError 获取第一个错误信息
+func (f *SimpleTextFormatter) getFirstError(entries []LogEntry) string {
+	for _, entry := range entries {
+		if entry.EntryType == EntryTypeError {
+			return entry.Message
+		}
+		if entry.EntryType == EntryTypeStep && entry.StepStatus == StepStatusFailed {
+			return entry.Message
+		}
+	}
+	return ""
+}
+
 // hasErrors 检查日志条目中是否有错误
 func hasErrors(entries []LogEntry) bool {
 	for _, entry := range entries {
-		if entry.Type == LogEntryTypeError || (entry.Type == LogEntryTypeStep && entry.StepStatus == StepStatusFailed) {
+		if entry.EntryType == EntryTypeError {
+			return true
+		}
+		if entry.EntryType == EntryTypeStep && entry.StepStatus == StepStatusFailed {
 			return true
 		}
 	}

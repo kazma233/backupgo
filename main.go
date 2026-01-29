@@ -5,6 +5,7 @@ import (
 	"backupgo/notice"
 	"backupgo/notice/message"
 	"backupgo/utils"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -83,6 +84,18 @@ func main() {
 
 		dh.backupTask()
 	})
+
+	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var ids []string
+		for id := range config.Config.BackupConf {
+			ids = append(ids, id)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ids": ids,
+		})
+	})
+
 	log.Println(http.ListenAndServe(":7000", nil))
 }
 
@@ -91,6 +104,9 @@ func (c *TaskHolder) initLogger() {
 }
 
 func (c *TaskHolder) backupTask() {
+	// 开始新任务，重置 logger 状态
+	c.logger.StartNewTask()
+
 	// 使用 TaskLogger 的装饰器方法
 	c.logger.ExecuteStep("BackupTask", func() error {
 		c.logger.ExecuteStep("backup", func() error {
