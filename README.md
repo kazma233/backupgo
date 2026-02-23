@@ -4,7 +4,7 @@
 
 # 使用
 
-1. 配置文件位置: `config/config.yml`，示例配置参考： `config/config.example.yml`
+1. 配置文件位置: `config.yml`，示例配置参考： `config.example.yml`
 2. 启动脚本
 
     ``` bash

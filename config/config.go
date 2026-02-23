@@ -1,7 +1,8 @@
 package config
 
 import (
-	_ "embed"
+	"io"
+	"os"
 
 	"github.com/goccy/go-yaml"
 )
@@ -44,16 +45,23 @@ type (
 	}
 )
 
-//go:embed config.yml
-var configBlob []byte
-
 var (
 	Config GlobalConfig
 )
 
 func InitConfig() {
+	f, err := os.OpenFile("config.yml", os.O_RDONLY, 0755)
+	if err != nil {
+		panic(err)
+	}
+
+	configBlob, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+
 	var config = GlobalConfig{}
-	err := yaml.Unmarshal(configBlob, &config)
+	err = yaml.Unmarshal(configBlob, &config)
 	if err != nil {
 		panic(err)
 	}
