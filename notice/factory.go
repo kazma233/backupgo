@@ -8,15 +8,20 @@ import (
 func NewManagerFromConfig(cfg config.GlobalConfig) *NoticeManager {
 	manager := NewNoticeManager()
 
-	if cfg.TG != nil {
-		tgBot := utils.NewTgBot(cfg.TG.Key)
-		manager.AddNotifier(NewTGNotifier(&tgBot, cfg.TgChatId))
+	if cfg.Notice == nil {
+		return manager
 	}
 
-	if cfg.Mail != nil {
-		mailConfig := cfg.Mail
+	if cfg.Notice.Telegram != nil {
+		telegramConfig := cfg.Notice.Telegram
+		tgBot := utils.NewTgBot(telegramConfig.BotToken)
+		manager.AddNotifier(NewTGNotifier(&tgBot, telegramConfig.ChatID))
+	}
+
+	if cfg.Notice.Mail != nil {
+		mailConfig := cfg.Notice.Mail
 		mailSender := utils.NewMailSender(mailConfig.Smtp, mailConfig.Port, mailConfig.User, mailConfig.Password)
-		manager.AddNotifier(NewMailNotifier(&mailSender, cfg.NoticeMail))
+		manager.AddNotifier(NewMailNotifier(&mailSender, mailConfig.To))
 	}
 
 	return manager

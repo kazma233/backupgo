@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"io"
 	"os"
 
@@ -11,11 +12,13 @@ type (
 	// GlobalConfig base config
 	GlobalConfig struct {
 		OSS        OssConfig               `yaml:"oss"`
-		Mail       *MailConfig             `yaml:"mail"`
-		TG         *TGConfig               `yaml:"tg"`
-		TgChatId   string                  `yaml:"tg_chat_id"`
-		NoticeMail []string                `yaml:"notice_mail"`
+		Notice     *NoticeConfig           `yaml:"notice"`
 		BackupConf map[string]BackupConfig `yaml:"backup"`
+	}
+
+	NoticeConfig struct {
+		Mail     *MailConfig     `yaml:"mail"`
+		Telegram *TelegramConfig `yaml:"telegram"`
 	}
 
 	BackupConfig struct {
@@ -33,15 +36,17 @@ type (
 		FastEndpoint    string `yaml:"fast_endpoint"`
 	}
 
-	TGConfig struct {
-		Key string `yaml:"key"`
+	TelegramConfig struct {
+		BotToken string `yaml:"bot_token"`
+		ChatID   string `yaml:"chat_id"`
 	}
 
 	MailConfig struct {
-		Smtp     string `yaml:"smtp"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
+		Smtp     string   `yaml:"smtp"`
+		Port     int      `yaml:"port"`
+		User     string   `yaml:"user"`
+		Password string   `yaml:"password"`
+		To       []string `yaml:"to"`
 	}
 )
 
@@ -54,27 +59,36 @@ func InitConfig() {
 	if err != nil {
 		panic(err)
 	}
+	defer f.Close()
 
 	configBlob, err := io.ReadAll(f)
 	if err != nil {
 		panic(err)
 	}
 
-	var config = GlobalConfig{}
-	err = yaml.Unmarshal(configBlob, &config)
+	config, err := ParseConfig(configBlob)
 	if err != nil {
 		panic(err)
 	}
 
+	Config = config
+}
+
+func ParseConfig(configBlob []byte) (GlobalConfig, error) {
+	var config GlobalConfig
+	if err := yaml.Unmarshal(configBlob, &config); err != nil {
+		return GlobalConfig{}, err
+	}
+
 	if len(config.BackupConf) <= 0 {
-		panic("config can not be empty")
+		return GlobalConfig{}, errors.New("config can not be empty")
 	}
 
 	for _, v := range config.BackupConf {
 		if v.BackPath == "" {
-			panic("id or back_path can not be empty")
+			return GlobalConfig{}, errors.New("id or back_path can not be empty")
 		}
 	}
 
-	Config = config
+	return config, nil
 }
