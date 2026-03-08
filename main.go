@@ -3,7 +3,6 @@ package main
 import (
 	"backupgo/config"
 	"backupgo/notice"
-	"backupgo/notice/message"
 	"backupgo/utils"
 	"encoding/json"
 	"log"
@@ -21,7 +20,7 @@ type TaskHolder struct {
 	conf          config.BackupConfig
 	ossClient     *OssClient
 	noticeManager *notice.NoticeManager
-	logger        *message.TaskLogger
+	logger        *notice.TaskLogger
 }
 
 func defaultHolder(id string, conf config.BackupConfig) *TaskHolder {
@@ -29,22 +28,11 @@ func defaultHolder(id string, conf config.BackupConfig) *TaskHolder {
 		panic("id or back_path can not be empty")
 	}
 
-	nm := notice.NewNoticeManager()
-	if config.Config.TG != nil {
-		tgBot := utils.NewTgBot(config.Config.TG.Key)
-		nm.AddNotifier(notice.NewTGNotifier(&tgBot, config.Config.TgChatId))
-	}
-	if config.Config.Mail != nil {
-		mailConfig := config.Config.Mail
-		ms := utils.NewMailSender(mailConfig.Smtp, mailConfig.Port, mailConfig.User, mailConfig.Password)
-		nm.AddNotifier(notice.NewMailNotifier(&ms, config.Config.NoticeMail))
-	}
-
 	holder := &TaskHolder{
 		ID:            id,
 		conf:          conf,
 		ossClient:     CreateOSSClient(config.Config.OSS),
-		noticeManager: nm,
+		noticeManager: notice.NewManagerFromConfig(config.Config),
 	}
 	holder.initLogger()
 	return holder
@@ -100,28 +88,26 @@ func main() {
 }
 
 func (c *TaskHolder) initLogger() {
-	c.logger = message.NewTaskLogger(c.ID)
+	c.logger = notice.NewTaskLogger(c.ID)
 }
 
 func (c *TaskHolder) backupTask() {
-	// 开始新任务，重置 logger 状态
 	c.logger.StartNewTask()
 
-	// 使用 TaskLogger 的装饰器方法
 	c.logger.ExecuteStep("BackupTask", func() error {
-		c.logger.ExecuteStep("backup", func() error {
-			c.backupWithLogger()
-			return nil
-		})
+		var taskErr error
 
-		c.logger.ExecuteStep("cleanHistory", func() error {
-			c.cleanHistoryWithLogger()
-			return nil
-		})
-		return nil
+		if err := c.backupWithLogger(); err != nil {
+			taskErr = err
+		}
+
+		if err := c.cleanHistoryWithLogger(); err != nil && taskErr == nil {
+			taskErr = err
+		}
+
+		return taskErr
 	})
 
-	// 在 main.go 中处理消息发送
 	c.sendMessages()
 }
 
@@ -129,8 +115,8 @@ func (c *TaskHolder) cleanHistory() {
 	c.cleanHistoryWithLogger()
 }
 
-func (c *TaskHolder) cleanHistoryWithLogger() {
-	c.logger.ExecuteStep("清理历史文件", func() error {
+func (c *TaskHolder) cleanHistoryWithLogger() error {
+	return c.logger.ExecuteStep("清理历史文件", func() error {
 		ossClient := c.ossClient
 
 		var objects []oss.ObjectProperties
@@ -177,84 +163,32 @@ func (c *TaskHolder) cleanHistoryWithLogger() {
 	})
 }
 
-func (c *TaskHolder) backupWithLogger() {
+func (c *TaskHolder) backupWithLogger() error {
 	conf := c.conf
 	path := conf.BackPath
 
-	c.logger.ExecuteStep("备份", func() error {
+	return c.logger.ExecuteStep("备份", func() error {
 		c.logger.LogInfo("备份路径: %s", path)
 
-		// 执行前置命令
 		if conf.BeforeCmd != "" {
-			if err := c.logger.ExecuteStep("执行前置命令", func() error {
-				c.logger.LogInfo("命令: %s", conf.BeforeCmd)
-				cmd := exec.Command("bash", "-c", conf.BeforeCmd)
-				if err := cmd.Run(); err != nil {
-					c.logger.LogError(err, "前置命令执行失败")
-					return err
-				}
-				return nil
-			}); err != nil {
+			if err := c.runCommandStep("执行前置命令", conf.BeforeCmd, "前置命令执行失败"); err != nil {
 				return err
 			}
 		}
 
-		// 压缩文件
-		var zipFile string
-		if err := c.logger.ExecuteStep("压缩文件", func() error {
-			var err error
-			zipFile, err = utils.ZipPath(path, utils.GetFileName(c.ID), func(filePath string, processed, total int64, percentage float64) {
-				c.logger.LogProgress(filePath, processed, total, percentage)
-			}, func(total int64) {
-				c.logger.LogInfo("压缩完成，总大小: %s", message.FormatBytes(total))
-			})
-			if err != nil {
-				c.logger.LogError(err, "压缩失败")
-				return err
-			}
-			return nil
-		}); err != nil {
+		zipFile, err := c.compressBackup(path)
+		if err != nil {
 			return err
 		}
 		defer os.Remove(zipFile)
 
-		// 执行后置命令
 		if conf.AfterCmd != "" {
-			if err := c.logger.ExecuteStep("执行后置命令", func() error {
-				c.logger.LogInfo("命令: %s", conf.AfterCmd)
-				cmd := exec.Command("bash", "-c", conf.AfterCmd)
-				if err := cmd.Run(); err != nil {
-					c.logger.LogError(err, "后置命令执行失败")
-					return err
-				}
-				return nil
-			}); err != nil {
+			if err := c.runCommandStep("执行后置命令", conf.AfterCmd, "后置命令执行失败"); err != nil {
 				return err
 			}
 		}
 
-		// 上传到OSS
-		objKey := filepath.Base(zipFile)
-		ossClient := c.ossClient
-		if err := c.logger.ExecuteStep("上传到OSS", func() error {
-			c.logger.LogInfo("文件: %s", objKey)
-
-			err := ossClient.Upload(objKey, zipFile, func(message string) {
-				c.logger.LogInfo("上传进度: %s", message)
-			})
-
-			if ossClient.HasError(err) {
-				c.logger.LogError(err, "上传失败")
-				return err
-			}
-
-			if ossClient.HasCoolDownError(err) {
-				c.logger.LogInfo("上传因冷却期延迟: %s", objKey)
-			} else {
-				c.logger.LogInfo("上传完成: %s", objKey)
-			}
-			return nil
-		}); err != nil {
+		if err := c.uploadBackup(zipFile); err != nil {
 			return err
 		}
 
@@ -262,15 +196,68 @@ func (c *TaskHolder) backupWithLogger() {
 	})
 }
 
+func (c *TaskHolder) runCommandStep(stepName string, command string, errorMessage string) error {
+	return c.logger.ExecuteStep(stepName, func() error {
+		c.logger.LogInfo("命令: %s", command)
+
+		cmd := exec.Command("bash", "-c", command)
+		if err := cmd.Run(); err != nil {
+			c.logger.LogError(err, errorMessage)
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (c *TaskHolder) compressBackup(path string) (string, error) {
+	var zipFile string
+
+	err := c.logger.ExecuteStep("压缩文件", func() error {
+		var err error
+		zipFile, err = utils.ZipPath(path, utils.GetFileName(c.ID), func(filePath string, processed, total int64, percentage float64) {
+			c.logger.LogProgress(filePath, processed, total, percentage)
+		}, func(total int64) {
+			c.logger.LogCompressed(total)
+		})
+		if err != nil {
+			c.logger.LogError(err, "压缩失败")
+			return err
+		}
+
+		return nil
+	})
+
+	return zipFile, err
+}
+
+func (c *TaskHolder) uploadBackup(zipFile string) error {
+	objKey := filepath.Base(zipFile)
+	ossClient := c.ossClient
+
+	return c.logger.ExecuteStep("上传到OSS", func() error {
+		c.logger.LogInfo("文件: %s", objKey)
+
+		err := ossClient.Upload(objKey, zipFile, func(status string) {
+			c.logger.LogInfo("上传进度: %s", status)
+		})
+
+		if ossClient.HasError(err) {
+			c.logger.LogError(err, "上传失败")
+			return err
+		}
+
+		if ossClient.HasCoolDownError(err) {
+			c.logger.LogInfo("上传因冷却期延迟: %s", objKey)
+			return nil
+		}
+
+		c.logger.LogUpload("OSS", objKey)
+		return nil
+	})
+}
+
 // sendMessages 发送 TaskLogger 收集的所有消息
 func (c *TaskHolder) sendMessages() {
-	// 创建简化文本格式化器
-	formatter := message.NewSimpleTextFormatter()
-
-	// 使用格式化器将日志条目转换为格式化消息
-	entries := c.logger.GetEntries()
-	message := formatter.Format(c.ID, c.logger.GetStartTime(), entries)
-
-	// 将格式化后的消息传递给 NoticeManager
-	c.noticeManager.Notice(message)
+	c.noticeManager.NoticeEntries(c.ID, c.logger.GetStartTime(), c.logger.GetEntries())
 }

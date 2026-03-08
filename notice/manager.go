@@ -2,6 +2,7 @@ package notice
 
 import (
 	"log"
+	"time"
 )
 
 type Notifier interface {
@@ -13,6 +14,9 @@ type Notifier interface {
 
 	// GetName 获取通知渠道名称
 	GetName() string
+
+	// GetFormatType 获取首选的消息格式类型
+	GetFormatType() FormatType
 }
 
 type NoticeManager struct {
@@ -29,14 +33,24 @@ func (m *NoticeManager) AddNotifier(n Notifier) {
 	m.notifiers = append(m.notifiers, n)
 }
 
-// Notice 直接发送拼接好的字符串消息给所有可用的通知器
-func (m *NoticeManager) Notice(message string) {
+// NoticeEntries 根据日志条目发送格式化的消息
+func (m *NoticeManager) NoticeEntries(taskID string, startTime time.Time, entries []LogEntry) {
+	summary := buildTaskSummary(taskID, startTime, entries)
+	messages := make(map[FormatType]string)
+
 	for _, n := range m.notifiers {
 		if !n.IsAvailable() {
 			continue
 		}
 
-		if err := n.Send(message); err != nil {
+		formatType := n.GetFormatType()
+		msg, ok := messages[formatType]
+		if !ok {
+			msg = newFormatter(formatType).FormatSummary(summary)
+			messages[formatType] = msg
+		}
+
+		if err := n.Send(msg); err != nil {
 			log.Printf("Failed to send messages via %s: %v", n.GetName(), err)
 		}
 	}

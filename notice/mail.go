@@ -26,11 +26,16 @@ func (m *MailNotifier) GetName() string {
 	return "Mail"
 }
 
-// Send 发送邮件
+func (m *MailNotifier) GetFormatType() FormatType {
+	return FormatTypeHTML
+}
+
+// Send 发送邮件 (使用HTML格式)
 func (m *MailNotifier) Send(content string) error {
 	errs := []error{}
+	contentType := "text/html; charset=UTF-8"
 	for _, to := range m.tos {
-		err := m.mailSender.SendEmail("backupgo", to, "备份消息通知", content)
+		err := m.mailSender.SendEmailWithContentType("backupgo", to, "备份消息通知", content, contentType)
 		if err != nil {
 			errs = append(errs, err)
 		}

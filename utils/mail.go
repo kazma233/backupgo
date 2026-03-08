@@ -18,17 +18,14 @@ type MailSender struct {
 	password string
 }
 
-var (
-	mailContentType = "text/plain; charset=UTF-8"
-	crlf            = "\r\n"
-)
+var crlf = "\r\n"
 
 func NewMailSender(smtpAddr string, port int, mailUser, password string) MailSender {
 	return MailSender{smtpAddr: smtpAddr, port: port, mailUser: mailUser, password: password}
 }
 
-// SendEmail send email
-func (ms MailSender) SendEmail(fromName, to, subject, body string) error {
+// SendEmailWithContentType send email with custom content type
+func (ms MailSender) SendEmailWithContentType(fromName, to, subject, body, contentType string) error {
 	smtpAddr := ms.smtpAddr
 	port := ms.port
 	mailUer := ms.mailUser
@@ -79,7 +76,7 @@ func (ms MailSender) SendEmail(fromName, to, subject, body string) error {
 	}
 	defer w.Close()
 
-	message := ms.buildMessage(fromName, to, subject, body)
+	message := ms.buildMessage(fromName, to, subject, body, contentType)
 	_, err = w.Write([]byte(message))
 	return err
 }
@@ -92,14 +89,14 @@ func (ms *MailSender) validateEmails(emails ...string) error {
 	}
 	return nil
 }
-func (ms *MailSender) buildMessage(fromName, to, subject, body string) string {
+func (ms *MailSender) buildMessage(fromName, to, subject, body, contentType string) string {
 	var buf bytes.Buffer
 
 	// 写入头部
 	writeHeader(&buf, "From", fmt.Sprintf("%s <%s>", ms.encodeRFC2047(fromName), ms.mailUser))
 	writeHeader(&buf, "To", to)
 	writeHeader(&buf, "Subject", ms.encodeRFC2047(subject))
-	writeHeader(&buf, "Content-Type", mailContentType)
+	writeHeader(&buf, "Content-Type", contentType)
 	writeHeader(&buf, "MIME-Version", "1.0")
 
 	// 添加空行分隔头部和正文
