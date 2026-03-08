@@ -101,14 +101,56 @@ func TestFormatterRendersPlainAndHTML(t *testing.T) {
 
 	html := newFormatter(FormatTypeHTML).FormatSummary(summary)
 	for _, want := range []string{
-		"<b>📦 备份任务:</b> <code>task-1</code>",
-		"✅ <b>状态:</b> 成功",
-		"⏱️ <b>耗时:</b> 2分3秒",
-		"📦 <b>压缩:</b> 10.0 MB",
-		"☁️ <b>上传至:</b> <code>OSS/demo.zip</code>",
+		"<div><b>📦 备份任务:</b> <code>task-1</code></div>",
+		"<div>✅ <b>状态:</b> 成功</div>",
+		"<div>⏱️ <b>耗时:</b> 2分3秒</div>",
+		"<div>📦 <b>压缩:</b> 10.0 MB</div>",
+		"<div>☁️ <b>上传至:</b> <code>OSS/demo.zip</code></div>",
+		"<div><br/></div>",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("html output missing %q: %s", want, html)
+		}
+	}
+}
+
+func TestFormatterEscapesHTMLContent(t *testing.T) {
+	summary := taskSummary{
+		taskID:         `task<&>`,
+		statusIcon:     "❌",
+		statusText:     `失败<&>`,
+		duration:       5 * time.Second,
+		stepCount:      1,
+		errorCount:     1,
+		compressedSize: `10<&> MB`,
+		uploads: []uploadInfo{
+			{bucket: `OSS&1`, key: `demo<zip>`},
+		},
+		firstError: `bad <error> & fail`,
+	}
+
+	html := newFormatter(FormatTypeHTML).FormatSummary(summary)
+	for _, want := range []string{
+		"<code>task&lt;&amp;&gt;</code>",
+		"<div>❌ <b>状态:</b> 失败&lt;&amp;&gt;</div>",
+		"<div>📦 <b>压缩:</b> 10&lt;&amp;&gt; MB</div>",
+		"<div>☁️ <b>上传至:</b> <code>OSS&amp;1/demo&lt;zip&gt;</code></div>",
+		"<div>❌ <b>错误:</b> <code>bad &lt;error&gt; &amp; fail</code></div>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("html output missing escaped content %q: %s", want, html)
+		}
+	}
+
+	for _, raw := range []string{
+		`task<&>`,
+		`失败<&>`,
+		`10<&> MB`,
+		`OSS&1/demo<zip>`,
+		`bad <error> & fail`,
+	} {
+		if strings.Contains(html, raw) {
+			t.Fatalf("html output should not contain raw content %q: %s", raw, html)
 		}
 	}
 }

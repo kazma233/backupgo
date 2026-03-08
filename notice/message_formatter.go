@@ -2,6 +2,7 @@ package notice
 
 import (
 	"fmt"
+	"html"
 	"strings"
 	"time"
 )
@@ -182,28 +183,40 @@ func renderMarkdown(builder *strings.Builder, summary taskSummary) {
 }
 
 func renderHTML(builder *strings.Builder, summary taskSummary) {
-	writeLine(builder, "<b>📦 备份任务:</b> <code>%s</code>", summary.taskID)
-	writeLine(builder, "%s <b>状态:</b> %s", summary.statusIcon, summary.statusText)
-	writeLine(builder, "⏱️ <b>耗时:</b> %s", FormatDuration(summary.duration))
-	writeLine(builder, "📊 <b>统计:</b> %d个步骤 | %d个错误", summary.stepCount, summary.errorCount)
-	writeLine(builder, "")
+	writeHTMLBlock(builder, "<b>📦 备份任务:</b> <code>%s</code>", escapeHTML(summary.taskID))
+	writeHTMLBlock(builder, "%s <b>状态:</b> %s", summary.statusIcon, escapeHTML(summary.statusText))
+	writeHTMLBlock(builder, "⏱️ <b>耗时:</b> %s", escapeHTML(FormatDuration(summary.duration)))
+	writeHTMLBlock(builder, "📊 <b>统计:</b> %d个步骤 | %d个错误", summary.stepCount, summary.errorCount)
+	writeHTMLSpacer(builder)
 
 	if summary.compressedSize != "" {
-		writeLine(builder, "📦 <b>压缩:</b> %s", summary.compressedSize)
+		writeHTMLBlock(builder, "📦 <b>压缩:</b> %s", escapeHTML(summary.compressedSize))
 	}
 
 	for _, upload := range summary.uploads {
-		writeLine(builder, "☁️ <b>上传至:</b> <code>%s/%s</code>", upload.bucket, upload.key)
+		writeHTMLBlock(builder, "☁️ <b>上传至:</b> <code>%s/%s</code>", escapeHTML(upload.bucket), escapeHTML(upload.key))
 	}
 
 	if summary.firstError != "" {
-		writeLine(builder, "")
-		writeLine(builder, "❌ <b>错误:</b> <code>%s</code>", summary.firstError)
+		writeHTMLSpacer(builder)
+		writeHTMLBlock(builder, "❌ <b>错误:</b> <code>%s</code>", escapeHTML(summary.firstError))
 	}
 }
 
 func writeLine(builder *strings.Builder, format string, args ...interface{}) {
 	fmt.Fprintf(builder, format+"\n", args...)
+}
+
+func writeHTMLBlock(builder *strings.Builder, format string, args ...interface{}) {
+	fmt.Fprintf(builder, "<div>%s</div>\n", fmt.Sprintf(format, args...))
+}
+
+func writeHTMLSpacer(builder *strings.Builder) {
+	builder.WriteString("<div><br/></div>\n")
+}
+
+func escapeHTML(value string) string {
+	return html.EscapeString(value)
 }
 
 func writeSeparator(builder *strings.Builder) {
