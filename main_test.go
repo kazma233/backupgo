@@ -14,8 +14,9 @@ func Test_backup(t *testing.T) {
 
 	before()
 
-	c := defaultHolder("test", config.BackupConfig{
-		BackPath: "~/Downloads/MapleMonoNormalNL-TTF",
+	c := newTaskHolder(config.BackupConfig{
+		ID:         "test",
+		BackupPath: "~/Downloads/MapleMonoNormalNL-TTF",
 	})
 
 	c.initLogger()
@@ -30,8 +31,9 @@ func Test_cleanOld(t *testing.T) {
 
 	before()
 
-	th := defaultHolder("test", config.BackupConfig{
-		BackPath: "E:/audio/asmr",
+	th := newTaskHolder(config.BackupConfig{
+		ID:         "test",
+		BackupPath: "E:/audio/asmr",
 	})
 	if err := th.cleanHistoryWithLogger(); err != nil {
 		t.Fatal(err)

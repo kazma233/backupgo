@@ -16,8 +16,8 @@ notice:
     bot_token: '123456:ABCDEF'
     chat_id: '123456789'
 backup:
-  app:
-    back_path: './export'
+  - id: 'app'
+    backup_path: './export'
 `)
 
 	cfg, err := ParseConfig(configBlob)
@@ -42,5 +42,102 @@ backup:
 	}
 	if cfg.Notice.Telegram.ChatID != "123456789" {
 		t.Fatalf("unexpected telegram chat id: %s", cfg.Notice.Telegram.ChatID)
+	}
+}
+
+func TestParseConfigWithPostgresSource(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'pg'
+    type: 'postgres'
+    postgres:
+      mode: 'docker'
+      container: 'postgres'
+      user: 'postgres'
+      password: 'password'
+      databases:
+        - 'app'
+`)
+
+	cfg, err := ParseConfig(configBlob)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	task, ok := cfg.FindBackupByID("pg")
+	if !ok {
+		t.Fatal("expected pg task to be present")
+	}
+	if task.GetType() != BackupTypePostgres {
+		t.Fatalf("unexpected backup type: %s", task.GetType())
+	}
+	if task.Postgres == nil {
+		t.Fatal("expected postgres config to be present")
+	}
+	if got := task.Postgres.GetMode(); got != ExecModeDocker {
+		t.Fatalf("unexpected postgres mode: %s", got)
+	}
+}
+
+func TestParseConfigWithMongoSource(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'mongo'
+    type: 'mongodb'
+    mongodb:
+      mode: 'local'
+      uri: 'mongodb://root:pass@127.0.0.1:27017/?authSource=admin'
+      gzip: true
+      databases:
+        - 'app'
+`)
+
+	cfg, err := ParseConfig(configBlob)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	task, ok := cfg.FindBackupByID("mongo")
+	if !ok {
+		t.Fatal("expected mongo task to be present")
+	}
+	if task.GetType() != BackupTypeMongoDB {
+		t.Fatalf("unexpected backup type: %s", task.GetType())
+	}
+	if task.MongoDB == nil {
+		t.Fatal("expected mongodb config to be present")
+	}
+	if !task.MongoDB.Gzip {
+		t.Fatal("expected mongodb gzip to be enabled")
+	}
+}
+
+func TestParseConfigRejectsMultipleSources(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'invalid'
+    type: 'postgres'
+    backup_path: './export'
+    postgres:
+      databases:
+        - 'app'
+`)
+
+	if _, err := ParseConfig(configBlob); err == nil {
+		t.Fatal("expected ParseConfig to fail for multiple sources")
+	}
+}
+
+func TestParseConfigRejectsDuplicateIDs(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'dup'
+    backup_path: './export-a'
+  - id: 'dup'
+    backup_path: './export-b'
+`)
+
+	if _, err := ParseConfig(configBlob); err == nil {
+		t.Fatal("expected ParseConfig to fail for duplicate ids")
 	}
 }

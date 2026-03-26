@@ -1,6 +1,7 @@
 package main
 
 import (
+	"backupgo/backupsource"
 	"backupgo/config"
 	"backupgo/notice"
 	"backupgo/utils"
@@ -23,13 +24,13 @@ type TaskHolder struct {
 	logger        *notice.TaskLogger
 }
 
-func defaultHolder(id string, conf config.BackupConfig) *TaskHolder {
-	if id == "" || conf.BackPath == "" {
-		panic("id or back_path can not be empty")
+func newTaskHolder(conf config.BackupConfig) *TaskHolder {
+	if err := conf.Validate(); err != nil {
+		panic(err)
 	}
 
 	holder := &TaskHolder{
-		ID:            id,
+		ID:            conf.GetID(),
 		conf:          conf,
 		ossClient:     CreateOSSClient(config.Config.OSS),
 		noticeManager: notice.NewManagerFromConfig(config.Config),
@@ -46,8 +47,8 @@ func main() {
 	)
 	c := cron.New(cron.WithParser(secondParser), cron.WithChain())
 
-	for id, conf := range config.Config.BackupConf {
-		dh := defaultHolder(id, conf)
+	for _, conf := range config.Config.BackupConf {
+		dh := newTaskHolder(conf)
 
 		backupTaskCron := conf.BackupTask
 		if backupTaskCron == "" {
@@ -67,7 +68,13 @@ func main() {
 
 	http.HandleFunc("/", func(resp http.ResponseWriter, req *http.Request) {
 		id := req.URL.Query().Get("id")
-		dh := defaultHolder(id, config.Config.BackupConf[id])
+		conf, ok := config.Config.FindBackupByID(id)
+		if !ok {
+			http.Error(resp, "backup task not found", http.StatusNotFound)
+			return
+		}
+
+		dh := newTaskHolder(conf)
 		log.Printf("backup task %v", dh)
 
 		dh.backupTask()
@@ -75,12 +82,8 @@ func main() {
 
 	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		var ids []string
-		for id := range config.Config.BackupConf {
-			ids = append(ids, id)
-		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ids": ids,
+			"ids": config.Config.BackupIDs(),
 		})
 	})
 
@@ -165,18 +168,23 @@ func (c *TaskHolder) cleanHistoryWithLogger() error {
 
 func (c *TaskHolder) backupWithLogger() error {
 	conf := c.conf
-	path := conf.BackPath
 
 	return c.logger.ExecuteStep("备份", func() error {
-		c.logger.LogInfo("备份路径: %s", path)
-
 		if conf.BeforeCmd != "" {
 			if err := c.runCommandStep("执行前置命令", conf.BeforeCmd, "前置命令执行失败"); err != nil {
 				return err
 			}
 		}
 
-		zipFile, err := c.compressBackup(path)
+		prepared, err := backupsource.Prepare(c.ID, conf, c.logger)
+		if err != nil {
+			return err
+		}
+		defer backupsource.Cleanup(c.logger, prepared)
+
+		c.logger.LogInfo("备份路径: %s", prepared.Path)
+
+		zipFile, err := c.compressBackup(prepared.Path)
 		if err != nil {
 			return err
 		}
