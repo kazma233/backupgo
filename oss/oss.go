@@ -1,4 +1,4 @@
-package main
+package oss
 
 import (
 	"backupgo/config"
@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	aliyunoss "github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
 
 var ErrCoolDown = errors.New("fast upload cool down")
@@ -16,7 +16,7 @@ var ErrCoolDown = errors.New("fast upload cool down")
 type (
 	NamedBucket struct {
 		Name   string
-		Bucket *oss.Bucket
+		Bucket *aliyunoss.Bucket
 	}
 
 	OssClient struct {
@@ -35,7 +35,7 @@ func CreateOSSClient(config config.OssConfig) *OssClient {
 			config.Endpoint,
 			config.AccessKey,
 			config.AccessKeySecret,
-			config.BucketName)), // slowBucket must not nil
+			config.BucketName)),
 		fastBucket: getBucket(
 			"FAST",
 			config.FastEndpoint,
@@ -115,10 +115,10 @@ func (oc *OssClient) TempVisitLink(objKey string) (string, error) {
 		return "", errors.New("bucket not init")
 	}
 
-	return oc.slowBucket.Bucket.SignURL(objKey, oss.HTTPGet, 60*60*24*1)
+	return oc.slowBucket.Bucket.SignURL(objKey, aliyunoss.HTTPGet, 60*60*24*1)
 }
 
-func (oc *OssClient) GetSlowClient() *oss.Bucket {
+func (oc *OssClient) GetSlowClient() *aliyunoss.Bucket {
 	return oc.slowBucket.Bucket
 }
 
@@ -150,7 +150,7 @@ func getBucket(customName, endpoint, ak, aks, buckatName string) *NamedBucket {
 		return nil
 	}
 
-	client, err := oss.New(endpoint, ak, aks, oss.Timeout(10, 60*60*3))
+	client, err := aliyunoss.New(endpoint, ak, aks, aliyunoss.Timeout(10, 60*60*3))
 	if err != nil {
 		panic(err)
 	}

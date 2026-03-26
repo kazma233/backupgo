@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -232,15 +231,12 @@ func (c MongoBackupConfig) GetMode() string {
 }
 
 func InitConfig() {
-	f, err := os.OpenFile("config.yml", os.O_RDONLY, 0755)
+	configBlob, err := os.ReadFile("config.yml")
 	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	configBlob, err := io.ReadAll(f)
-	if err != nil {
-		panic(err)
+		configBlob, err = os.ReadFile("config.yaml")
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	config, err := ParseConfig(configBlob)

@@ -66,9 +66,20 @@
 2. 启动脚本
 
     ``` bash
-    cp script_example/rebuild.sh rebuild.sh
-    chmod +x rebuild.sh
-    ./rebuild.sh
+    # 构建
+    go build -o backupgo .
+
+    # 后台启动 daemon（定时执行备份任务）
+    ./backupgo daemon
+
+    # 查看 daemon 状态和备份任务列表
+    ./backupgo status
+
+    # 手动执行指定备份
+    ./backupgo backup <backup-id>
+
+    # 查看帮助
+    ./backupgo --help
     ```
 
 # 配置说明

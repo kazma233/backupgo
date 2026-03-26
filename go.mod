@@ -1,11 +1,12 @@
 module backupgo
 
-go 1.21
+go 1.22
 
 require (
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/goccy/go-yaml v1.12.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/urfave/cli/v3 v3.8.0
 )
 
 require (

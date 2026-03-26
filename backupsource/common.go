@@ -114,7 +114,9 @@ func prepareCommandBackedBackup(taskID string, logger Logger, action commandBack
 		return nil
 	})
 	if err != nil {
-		_ = prepared.Cleanup()
+		if cleanupErr := prepared.Cleanup(); cleanupErr != nil {
+			logger.LogError(cleanupErr, "清理临时文件失败 (backup error: %v)", err)
+		}
 		return nil, err
 	}
 
@@ -165,7 +167,7 @@ func runCommandToFile(spec commandSpec, targetFile string) error {
 		if message != "" {
 			return fmt.Errorf("%w: %s", err, message)
 		}
-		return err
+		return fmt.Errorf("%w: command exited without error message", err)
 	}
 
 	return nil
