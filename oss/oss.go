@@ -118,8 +118,40 @@ func (oc *OssClient) TempVisitLink(objKey string) (string, error) {
 	return oc.slowBucket.Bucket.SignURL(objKey, aliyunoss.HTTPGet, 60*60*24*1)
 }
 
-func (oc *OssClient) GetSlowClient() *aliyunoss.Bucket {
-	return oc.slowBucket.Bucket
+func (oc *OssClient) DeleteObjectsByPredicate(shouldDelete func(key string) bool) ([]string, error) {
+	bucket := oc.slowBucket.Bucket
+
+	var keys []string
+	token := ""
+
+	for {
+		resp, err := bucket.ListObjectsV2(aliyunoss.MaxKeys(100), aliyunoss.ContinuationToken(token))
+		if err != nil {
+			return nil, err
+		}
+
+		for _, obj := range resp.Objects {
+			if shouldDelete(obj.Key) {
+				keys = append(keys, obj.Key)
+			}
+		}
+
+		if !resp.IsTruncated {
+			break
+		}
+		token = resp.NextContinuationToken
+	}
+
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	result, err := bucket.DeleteObjects(keys)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.DeletedObjects, nil
 }
 
 func must[T any](obj T) T {

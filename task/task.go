@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	aliyunoss "github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
 
 type TaskHolder struct {
@@ -44,7 +42,7 @@ func (c *TaskHolder) initLogger() {
 func (c *TaskHolder) BackupTask() {
 	c.logger.StartNewTask()
 
-	if err := c.backupWithLogger(); err != nil {
+	if err := c.backup(); err != nil {
 		state.GetState().SetTaskRun(c.ID, "failed")
 		c.sendMessages()
 		return
@@ -52,60 +50,34 @@ func (c *TaskHolder) BackupTask() {
 
 	state.GetState().SetTaskRun(c.ID, "success")
 
-	if err := c.cleanHistoryWithLogger(); err != nil {
+	if err := c.cleanHistory(); err != nil {
 		state.GetState().SetTaskRun(c.ID, "failed")
 	}
 
 	c.sendMessages()
 }
 
-func (c *TaskHolder) cleanHistoryWithLogger() error {
+func (c *TaskHolder) cleanHistory() error {
 	return c.logger.ExecuteStep("清理历史文件", func() error {
-		var objects []aliyunoss.ObjectProperties
-		token := ""
-		for {
-			resp, err := c.ossClient.GetSlowClient().ListObjectsV2(aliyunoss.MaxKeys(100), aliyunoss.ContinuationToken(token))
-			if err != nil {
-				c.logger.LogError(err, "列出对象失败")
-				return err
-			}
-
-			for _, object := range resp.Objects {
-				need := utils.IsNeedDeleteFile(c.ID, object.Key)
-				if need {
-					objects = append(objects, object)
-				}
-			}
-			if resp.IsTruncated {
-				token = resp.NextContinuationToken
-			} else {
-				break
-			}
-		}
-
-		if len(objects) <= 0 {
-			c.logger.LogInfo("无需删除文件")
-			return nil
-		}
-
-		var keys []string
-		for _, k := range objects {
-			keys = append(keys, k.Key)
-		}
-
-		c.logger.LogInfo("找到 %d 个文件需要删除", len(keys))
-		deleteObjects, err := c.ossClient.GetSlowClient().DeleteObjects(keys)
+		deleted, err := c.ossClient.DeleteObjectsByPredicate(func(key string) bool {
+			return utils.IsNeedDeleteFile(c.ID, key)
+		})
 		if err != nil {
 			c.logger.LogError(err, "删除失败")
 			return err
 		}
 
-		c.logger.LogInfo("成功删除：%v", deleteObjects.DeletedObjects)
+		if len(deleted) == 0 {
+			c.logger.LogInfo("无需删除文件")
+			return nil
+		}
+
+		c.logger.LogInfo("成功删除：%v个文件", deleted)
 		return nil
 	})
 }
 
-func (c *TaskHolder) backupWithLogger() error {
+func (c *TaskHolder) backup() error {
 	conf := c.conf
 
 	return c.logger.ExecuteStep("备份", func() error {
