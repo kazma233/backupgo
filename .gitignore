@@ -3,4 +3,5 @@ config.yml
 .kiro
 backupgo
 app
-.Ds_Store
+.DS_Store
+*state.json

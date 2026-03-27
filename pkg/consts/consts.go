@@ -1,6 +1,7 @@
 package consts
 
 const (
-	AppName = "backupgo"
-	PIDFile = AppName + ".pid"
+	AppName     = "backupgo"
+	PIDFileName = AppName + ".pid"
+	LogFileName = AppName + ".log"
 )

@@ -6,7 +6,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"backupgo/cmd/backup"
-	"backupgo/cmd/daemon"
+	"backupgo/cmd/scheduler"
 	"backupgo/cmd/status"
 )
 
@@ -15,7 +15,8 @@ func Run(args []string) error {
 		Name:  "backupgo",
 		Usage: "Backup management tool",
 		Commands: []*cli.Command{
-			daemon.DaemonCommand(),
+			scheduler.StartCommand(),
+			scheduler.StopCommand(),
 			status.StatusCommand(),
 			backup.BackupCommand(),
 		},

@@ -4,83 +4,92 @@
 
 # 使用
 
-1. 配置文件位置: `config.yml`，示例配置参考:
+## 配置文件
 
-    ```yaml
-    notice:
-      mail:
-        smtp: 'smtp'
-        port: 456
-        user: 'user'
-        password: 'password'
-        to:
-          - 'notice@example.com'
-      telegram:
-        bot_token: '123456:ABCDEF'
-        # 私聊/群组建议填写数字 chat_id；公开频道可填写 @channel_username
-        chat_id: '@your_channel'
+位置: `config.yml`，示例配置参考如下：
 
-    oss:
-      bucket_name: 'bucket'
-      endpoint: 'endpoint'
-      fast_endpoint: 'fast_endpoint'
-      access_key: 'access_key'
-      access_key_secret: 'access_key_secret'
+```yaml
+notice:
+  mail:
+    smtp: 'smtp'
+    port: 456
+    user: 'user'
+    password: 'password'
+    to:
+      - 'notice@example.com'
+  telegram:
+    bot_token: '123456:ABCDEF'
+    # 私聊/群组建议填写数字 chat_id；公开频道可填写 @channel_username
+    chat_id: '@your_channel'
 
-    backup:
-      - id: 'app1'
-        before_command: 'docker cp xxx:/app/data/ ./export'
-        type: 'path'
-        backup_path: './export'
-        after_command: 'rm -rf ./export'
-        backup_task: '0 25 0 * * ?'
+oss:
+  bucket_name: 'bucket'
+  endpoint: 'endpoint'
+  fast_endpoint: 'fast_endpoint'
+  access_key: 'access_key'
+  access_key_secret: 'access_key_secret'
 
-      - id: 'postgres_prod'
-        type: 'postgres'
-        backup_task: '0 40 0 * * ?'
-        postgres:
-          mode: 'docker'
-          container: 'postgres'
-          user: 'postgres'
-          password: 'password'
-          databases:
-            - 'app'
-            - 'analytics'
-          extra_args:
-            - '--no-owner'
+backup:
+  - id: 'app1'
+    before_command: 'docker cp xxx:/app/data/ ./export'
+    type: 'path'
+    backup_path: './export'
+    after_command: 'rm -rf ./export'
+    backup_task: '0 25 0 * * ?'
 
-      - id: 'mongodb_prod'
-        type: 'mongodb'
-        backup_task: '0 55 0 * * ?'
-        mongodb:
-          mode: 'docker'
-          container: 'mongo'
-          username: 'root'
-          password: 'password'
-          auth_database: 'admin'
-          gzip: true
-          databases:
-            - 'app'
-            - 'logs'
-    ```
-2. 启动脚本
+  - id: 'postgres_prod'
+    type: 'postgres'
+    backup_task: '0 40 0 * * ?'
+    postgres:
+      mode: 'docker'
+      container: 'postgres'
+      user: 'postgres'
+      password: 'password'
+      databases:
+        - 'app'
+        - 'analytics'
+      extra_args:
+        - '--no-owner'
 
-    ``` bash
-    # 构建
-    go build -o backupgo .
+  - id: 'mongodb_prod'
+    type: 'mongodb'
+    backup_task: '0 55 0 * * ?'
+    mongodb:
+      mode: 'docker'
+      container: 'mongo'
+      username: 'root'
+      password: 'password'
+      auth_database: 'admin'
+      gzip: true
+      databases:
+        - 'app'
+        - 'logs'
+```
 
-    # 后台启动 daemon（定时执行备份任务）
-    ./backupgo daemon
+## 启动脚本
 
-    # 查看 daemon 状态和备份任务列表
-    ./backupgo status
+``` bash
+# 构建
+go build -o backupgo .
 
-    # 手动执行指定备份
-    ./backupgo backup <backup-id>
+# 前台启动调度器
+./backupgo start
 
-    # 查看帮助
-    ./backupgo --help
-    ```
+# 后台启动调度器
+./backupgo start -d
+
+# 停止后台进程
+./backupgo stop
+
+# 查看调度器状态和备份任务列表
+./backupgo status
+
+# 手动执行指定备份
+./backupgo backup <backup-id>
+
+# 查看帮助
+./backupgo --help
+```
 
 # 配置说明
 
@@ -158,3 +167,75 @@
 - 依赖 `mongodump`；如果 `mongodb.mode: docker`，则依赖宿主机可执行 `docker`，并要求容器内可执行 `mongodump`。
 - `mongodb.password` 是可选的；如果服务端允许无认证访问，或者你通过 `mongodb.uri` 使用了不依赖密码的认证方式，可以不填。
 - 如果 MongoDB 开启了用户名密码认证，并且未通过 `mongodb.uri` 提供其他认证方式，则需要填写 `mongodb.username` 和 `mongodb.password`。
+
+# 恢复示例
+
+先从 OSS 下载对应的备份 zip 文件并解压。内置数据库备份解压后通常会得到这样的文件：
+
+- Postgres: `<backup-id>/<database>.dump`
+- MongoDB: `<backup-id>/<database>.archive` 或 `<backup-id>/<database>.archive.gz`
+
+例如任务 ID 为 `postgres_prod` / `mongodb_prod`，解压后可能得到：
+
+```text
+postgres_prod/app.dump
+mongodb_prod/app.archive.gz
+```
+
+**恢复 Postgres**
+
+内置 Postgres 备份使用的是 `pg_dump --format=custom`，所以恢复时应使用 `pg_restore`。
+
+```bash
+export PGPASSWORD='<密码>'
+
+pg_restore \
+  -h <主机> \
+  -p <端口> \
+  -U <用户> \
+  -d <目标数据库> \
+  --clean \
+  --if-exists \
+  --no-owner \
+  ./postgres_prod/app.dump
+```
+
+如果目标数据库还不存在，可以先创建：
+
+```bash
+createdb -h <主机> -p <端口> -U <用户> <目标数据库>
+```
+
+**恢复 MongoDB**
+
+内置 MongoDB 备份使用的是 `mongodump --archive`，恢复时应使用 `mongorestore --archive`。
+
+未启用 `mongodb.gzip` 时：
+
+```bash
+mongorestore \
+  --host <主机> \
+  --port <端口> \
+  --username <用户> \
+  --password '<密码>' \
+  --authenticationDatabase <认证库> \
+  --drop \
+  --archive=./mongodb_prod/app.archive
+```
+
+启用 `mongodb.gzip: true` 时：
+
+```bash
+mongorestore \
+  --host <主机> \
+  --port <端口> \
+  --username <用户> \
+  --password '<密码>' \
+  --authenticationDatabase <认证库> \
+  --drop \
+  --gzip \
+  --archive=./mongodb_prod/app.archive.gz
+```
+
+- `--drop` 表示恢复前先删除已存在的集合；如果你不希望覆盖现有数据，请去掉它。
+- 如果你使用的是 `mongodb.uri` 方式连接，也可以直接写成 `mongorestore --uri '<连接串>' --drop --archive=...`；`gzip` 文件额外加上 `--gzip`。

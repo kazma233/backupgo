@@ -3,6 +3,7 @@ package status
 import (
 	"backupgo/config"
 	"backupgo/pkg/consts"
+	"backupgo/pkg/procutil"
 	"backupgo/state"
 	"context"
 	"fmt"
@@ -17,7 +18,7 @@ import (
 func StatusCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "status",
-		Usage: "Show daemon status and list all backup tasks",
+		Usage: "Show scheduler status and list all backup tasks",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runStatus()
 		},
@@ -34,26 +35,31 @@ func runStatus() error {
 func showPID() {
 	pid, err := readPID()
 	if err != nil {
-		fmt.Println("Daemon status: not running (no PID file)")
+		fmt.Println("Scheduler status: not running (no PID file)")
 		return
 	}
 
-	process, err := os.FindProcess(pid)
+	running, err := procutil.IsRunning(pid)
 	if err != nil {
-		fmt.Printf("Daemon status: PID %d (process check failed: %v)\n", pid, err)
+		fmt.Printf("Scheduler status: PID %d (process check failed: %v)\n", pid, err)
 		return
 	}
 
-	if process.Pid == 0 {
-		fmt.Println("Daemon status: not running (PID 0)")
+	if !running {
+		fmt.Printf("Scheduler status: not running (stale PID file: %d)\n", pid)
 		return
 	}
 
-	fmt.Printf("Daemon status: running (PID %d)\n", pid)
+	fmt.Printf("Scheduler status: running (PID %d)\n", pid)
 }
 
 func readPID() (int, error) {
-	data, err := os.ReadFile(consts.PIDFile)
+	pidFile, err := consts.PIDFilePath()
+	if err != nil {
+		return 0, err
+	}
+
+	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, err
 	}
