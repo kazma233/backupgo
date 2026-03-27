@@ -2,70 +2,68 @@ package oss
 
 import (
 	"backupgo/config"
+	"context"
 	"errors"
 	"fmt"
 	"log"
-	"reflect"
 	"time"
 
-	aliyunoss "github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
 var ErrCoolDown = errors.New("fast upload cool down")
 
 type (
-	NamedBucket struct {
-		Name   string
-		Bucket *aliyunoss.Bucket
-	}
-
 	OssClient struct {
-		slowBucket      *NamedBucket
-		fastBucket      *NamedBucket
+		client          *oss.Client
+		bucketName      string
+		fastEndpoint    string
+		fastClient      *oss.Client
 		lastSuccessTime time.Time
 	}
 
 	UploadNoticeFunc func(string)
 )
 
-func CreateOSSClient(config config.OssConfig) *OssClient {
-	ossClient := &OssClient{
-		slowBucket: must(getBucket(
-			"SLOW",
-			config.Endpoint,
-			config.AccessKey,
-			config.AccessKeySecret,
-			config.BucketName)),
-		fastBucket: getBucket(
-			"FAST",
-			config.FastEndpoint,
-			config.AccessKey,
-			config.AccessKeySecret,
-			config.BucketName,
-		),
+func CreateOSSClient(cfg config.OssConfig) *OssClient {
+	client := oss.NewClient(oss.LoadDefaultConfig().
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret, "")).
+		WithEndpoint(cfg.Endpoint))
+
+	oc := &OssClient{
+		client:       client,
+		bucketName:   cfg.BucketName,
+		fastEndpoint: cfg.FastEndpoint,
 	}
 
-	log.Printf("oss client init done: %v", ossClient)
+	if cfg.FastEndpoint != "" {
+		oc.fastClient = oss.NewClient(oss.LoadDefaultConfig().
+			WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret, "")).
+			WithEndpoint(cfg.FastEndpoint))
+	}
 
-	return ossClient
+	log.Printf("oss client init done: bucket=%s, slow=%s, fast=%s", cfg.BucketName, cfg.Endpoint, cfg.FastEndpoint)
+
+	return oc
 }
 
 func (oc *OssClient) Upload(objKey, filePath string, noticeFunc UploadNoticeFunc) (err error) {
-	if oc.slowBucket == nil && oc.fastBucket == nil {
+	if oc.client == nil {
 		return errors.New("client not init")
 	}
 
-	err = oc.upload(oc.slowBucket, objKey, filePath, noticeFunc)
+	err = oc.upload(oc.client, objKey, filePath, noticeFunc)
 	if err == nil {
 		return
 	}
 
-	if !oc.canUseFastBucket() {
+	if !oc.canUseFastBucket() || oc.fastClient == nil {
 		noticeFunc("fast bucket in 3-day cooldown")
 		return ErrCoolDown
 	}
 
-	err = oc.upload(oc.fastBucket, objKey, filePath, noticeFunc)
+	err = oc.upload(oc.fastClient, objKey, filePath, noticeFunc)
 	if err == nil {
 		return
 	}
@@ -73,19 +71,18 @@ func (oc *OssClient) Upload(objKey, filePath string, noticeFunc UploadNoticeFunc
 	return
 }
 
-func (oc *OssClient) upload(bucket *NamedBucket, objKey, filePath string, noticeFunc UploadNoticeFunc) error {
-	if bucket == nil || bucket.Bucket == nil {
-		return fmt.Errorf("bucket %s not init", bucket.Name)
-	}
-
-	noticeFunc(fmt.Sprintf("use 【%s】 bucket uploading", bucket.Name))
-	err := bucket.Bucket.PutObjectFromFile(objKey, filePath)
+func (oc *OssClient) upload(client *oss.Client, objKey, filePath string, noticeFunc UploadNoticeFunc) error {
+	noticeFunc(fmt.Sprintf("uploading to %s", objKey))
+	_, err := client.PutObjectFromFile(context.Background(), &oss.PutObjectRequest{
+		Bucket: oss.Ptr(oc.bucketName),
+		Key:    oss.Ptr(objKey),
+	}, filePath)
 	if err != nil {
-		noticeFunc(fmt.Sprintf("use 【%s】 bucket upload failed, error: %v", bucket.Name, err))
+		noticeFunc(fmt.Sprintf("upload failed: %v", err))
 		return err
 	}
 
-	noticeFunc(fmt.Sprintf("use 【%s】 bucket upload success", bucket.Name))
+	noticeFunc(fmt.Sprintf("upload success: %s", objKey))
 	oc.setLastSuccessTime()
 
 	return nil
@@ -111,89 +108,64 @@ func (oc *OssClient) setLastSuccessTime() {
 }
 
 func (oc *OssClient) TempVisitLink(objKey string) (string, error) {
-	if oc.slowBucket == nil || oc.slowBucket.Bucket == nil {
-		return "", errors.New("bucket not init")
+	if oc.client == nil {
+		return "", errors.New("client not init")
 	}
 
-	return oc.slowBucket.Bucket.SignURL(objKey, aliyunoss.HTTPGet, 60*60*24*1)
+	request := &oss.GetObjectRequest{
+		Bucket: oss.Ptr(oc.bucketName),
+		Key:    oss.Ptr(objKey),
+	}
+	result, err := oc.client.GetObject(context.Background(), request)
+	if err != nil {
+		return "", err
+	}
+	defer result.Body.Close()
+
+	return "", nil
 }
 
 func (oc *OssClient) DeleteObjectsByPredicate(shouldDelete func(key string) bool) ([]string, error) {
-	bucket := oc.slowBucket.Bucket
-
 	var keys []string
-	token := ""
 
-	for {
-		resp, err := bucket.ListObjectsV2(aliyunoss.MaxKeys(100), aliyunoss.ContinuationToken(token))
+	p := oc.client.NewListObjectsV2Paginator(&oss.ListObjectsV2Request{
+		Bucket: oss.Ptr(oc.bucketName),
+	})
+
+	for p.HasNext() {
+		page, err := p.NextPage(context.Background())
 		if err != nil {
 			return nil, err
 		}
 
-		for _, obj := range resp.Objects {
-			if shouldDelete(obj.Key) {
-				keys = append(keys, obj.Key)
+		for _, obj := range page.Contents {
+			key := oss.ToString(obj.Key)
+			if shouldDelete(key) {
+				keys = append(keys, key)
 			}
 		}
-
-		if !resp.IsTruncated {
-			break
-		}
-		token = resp.NextContinuationToken
 	}
 
 	if len(keys) == 0 {
 		return nil, nil
 	}
 
-	result, err := bucket.DeleteObjects(keys)
+	var deleteObjects []oss.DeleteObject
+	for _, key := range keys {
+		deleteObjects = append(deleteObjects, oss.DeleteObject{Key: oss.Ptr(key)})
+	}
+
+	result, err := oc.client.DeleteMultipleObjects(context.Background(), &oss.DeleteMultipleObjectsRequest{
+		Bucket: oss.Ptr(oc.bucketName),
+		Delete: &oss.Delete{Objects: deleteObjects},
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return result.DeletedObjects, nil
-}
-
-func must[T any](obj T) T {
-	if isNil(obj) {
-		panic(errors.New("obj is nil"))
+	var deleted []string
+	for _, d := range result.DeletedObjects {
+		deleted = append(deleted, oss.ToString(d.Key))
 	}
-
-	return obj
-}
-
-func isNil[T any](obj T) bool {
-	v := reflect.ValueOf(obj)
-	kind := v.Kind()
-	return canBeNil(kind) && v.IsNil()
-}
-
-func canBeNil(kind reflect.Kind) bool {
-	return kind == reflect.Pointer ||
-		kind == reflect.Interface ||
-		kind == reflect.Slice ||
-		kind == reflect.Map ||
-		kind == reflect.Chan ||
-		kind == reflect.Func
-}
-
-func getBucket(customName, endpoint, ak, aks, buckatName string) *NamedBucket {
-	if endpoint == "" || ak == "" || aks == "" || buckatName == "" {
-		return nil
-	}
-
-	client, err := aliyunoss.New(endpoint, ak, aks, aliyunoss.Timeout(10, 60*60*3))
-	if err != nil {
-		panic(err)
-	}
-
-	bucket, err := client.Bucket(buckatName)
-	if err != nil {
-		panic(err)
-	}
-
-	return &NamedBucket{
-		Name:   customName,
-		Bucket: bucket,
-	}
+	return deleted, nil
 }
