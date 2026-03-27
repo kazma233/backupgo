@@ -7,35 +7,36 @@ import (
 )
 
 type postgresBackupSource struct {
-	conf config.PostgresBackupConfig
+	taskID string
+	logger Logger
+	conf   config.PostgresBackupConfig
 }
 
-type postgresBackupAction struct {
-	conf config.PostgresBackupConfig
-}
+func (s postgresBackupSource) PrepareData() (*PreparedData, error) {
+	prepared, err := newPreparedData(s.taskID, s.logger)
+	if err != nil {
+		return nil, err
+	}
 
-func (s postgresBackupSource) Prepare(taskID string, logger Logger) (*PreparedBackup, error) {
-	return prepareCommandBackedBackup(taskID, logger, postgresBackupAction{conf: s.conf})
-}
+	err = s.logger.ExecuteStep("导出Postgres", func() error {
+		for _, db := range s.conf.Databases {
+			targetFile := filepath.Join(prepared.Path, sanitizeDumpFileName(db)+".dump")
+			s.logger.LogInfo("导出 Postgres 数据库 %s -> %s", db, targetFile)
 
-func (a postgresBackupAction) StepName() string {
-	return "导出Postgres"
-}
+			spec := buildPostgresDumpCommand(s.conf, db)
+			if err := runCommandToFile(spec, targetFile); err != nil {
+				s.logger.LogError(err, "Postgres 数据库 %s 导出失败", db)
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		prepared.Cleanup()
+		return nil, err
+	}
 
-func (a postgresBackupAction) ItemName() string {
-	return "Postgres 数据库"
-}
-
-func (a postgresBackupAction) Items() []string {
-	return a.conf.Databases
-}
-
-func (a postgresBackupAction) TargetFile(rootDir string, item string) string {
-	return filepath.Join(rootDir, sanitizeDumpFileName(item)+".dump")
-}
-
-func (a postgresBackupAction) Command(item string) commandSpec {
-	return buildPostgresDumpCommand(a.conf, item)
+	return prepared, nil
 }
 
 func buildPostgresDumpCommand(conf config.PostgresBackupConfig, database string) commandSpec {

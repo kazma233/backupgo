@@ -7,35 +7,36 @@ import (
 )
 
 type mongoBackupSource struct {
-	conf config.MongoBackupConfig
+	taskID string
+	logger Logger
+	conf   config.MongoBackupConfig
 }
 
-type mongoBackupAction struct {
-	conf config.MongoBackupConfig
-}
+func (s mongoBackupSource) PrepareData() (*PreparedData, error) {
+	prepared, err := newPreparedData(s.taskID, s.logger)
+	if err != nil {
+		return nil, err
+	}
 
-func (s mongoBackupSource) Prepare(taskID string, logger Logger) (*PreparedBackup, error) {
-	return prepareCommandBackedBackup(taskID, logger, mongoBackupAction{conf: s.conf})
-}
+	err = s.logger.ExecuteStep("导出MongoDB", func() error {
+		for _, db := range s.conf.Databases {
+			targetFile := filepath.Join(prepared.Path, mongoArchiveFileName(db, s.conf.Gzip))
+			s.logger.LogInfo("导出 MongoDB 数据库 %s -> %s", db, targetFile)
 
-func (a mongoBackupAction) StepName() string {
-	return "导出MongoDB"
-}
+			spec := buildMongoDumpCommand(s.conf, db)
+			if err := runCommandToFile(spec, targetFile); err != nil {
+				s.logger.LogError(err, "MongoDB 数据库 %s 导出失败", db)
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		prepared.Cleanup()
+		return nil, err
+	}
 
-func (a mongoBackupAction) ItemName() string {
-	return "MongoDB 数据库"
-}
-
-func (a mongoBackupAction) Items() []string {
-	return a.conf.Databases
-}
-
-func (a mongoBackupAction) TargetFile(rootDir string, item string) string {
-	return filepath.Join(rootDir, mongoArchiveFileName(item, a.conf.Gzip))
-}
-
-func (a mongoBackupAction) Command(item string) commandSpec {
-	return buildMongoDumpCommand(a.conf, item)
+	return prepared, nil
 }
 
 func buildMongoDumpCommand(conf config.MongoBackupConfig, database string) commandSpec {

@@ -1,10 +1,12 @@
 package exporter
 
 type pathSource struct {
-	path string
+	taskID string
+	logger Logger
+	path   string
 }
 
-func (s pathSource) Prepare(taskID string, logger Logger) (*PreparedBackup, error) {
-	logger.LogInfo("使用目录备份源: %s", s.path)
-	return &PreparedBackup{Path: s.path}, nil
+func (s pathSource) PrepareData() (*PreparedData, error) {
+	s.logger.LogInfo("使用目录备份源: %s", s.path)
+	return &PreparedData{Path: s.path, logger: s.logger}, nil
 }

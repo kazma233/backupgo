@@ -44,17 +44,16 @@ func (c *TaskHolder) initLogger() {
 func (c *TaskHolder) BackupTask() {
 	c.logger.StartNewTask()
 
-	var taskErr error
-
 	if err := c.backupWithLogger(); err != nil {
-		taskErr = err
 		state.GetState().SetTaskRun(c.ID, "failed")
-	} else {
-		state.GetState().SetTaskRun(c.ID, "success")
+		c.sendMessages()
+		return
 	}
 
-	if err := c.cleanHistoryWithLogger(); err != nil && taskErr == nil {
-		taskErr = err
+	state.GetState().SetTaskRun(c.ID, "success")
+
+	if err := c.cleanHistoryWithLogger(); err != nil {
+		state.GetState().SetTaskRun(c.ID, "failed")
 	}
 
 	c.sendMessages()
@@ -120,7 +119,7 @@ func (c *TaskHolder) backupWithLogger() error {
 		if err != nil {
 			return err
 		}
-		defer exporter.Cleanup(c.logger, prepared)
+		defer prepared.Cleanup()
 
 		c.logger.LogInfo("备份路径: %s", prepared.Path)
 
