@@ -1,4 +1,4 @@
-package backupsource
+package exporter
 
 import (
 	"backupgo/config"
@@ -18,7 +18,7 @@ func TestNewSource(t *testing.T) {
 				ID:         "path",
 				BackupPath: "./export",
 			},
-			wantType: "backupsource.pathSource",
+			wantType: "exporter.pathSource",
 		},
 		{
 			name: "postgres",
@@ -29,7 +29,7 @@ func TestNewSource(t *testing.T) {
 					Databases: []string{"app"},
 				},
 			},
-			wantType: "backupsource.postgresBackupSource",
+			wantType: "exporter.postgresBackupSource",
 		},
 		{
 			name: "mongodb",
@@ -40,7 +40,7 @@ func TestNewSource(t *testing.T) {
 					Databases: []string{"app"},
 				},
 			},
-			wantType: "backupsource.mongoBackupSource",
+			wantType: "exporter.mongoBackupSource",
 		},
 	}
 

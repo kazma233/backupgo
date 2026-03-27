@@ -185,6 +185,7 @@ mongodb_prod/app.archive.gz
 **恢复 Postgres**
 
 内置 Postgres 备份使用的是 `pg_dump --format=custom`，所以恢复时应使用 `pg_restore`。
+恢复时可以显式指定目标数据库名，不要求和备份时的源数据库同名；这对验证恢复流程很有用，例如把 `app.dump` 恢复到测试库 `app_restore_test`。
 
 ```bash
 export PGPASSWORD='<密码>'
@@ -205,6 +206,10 @@ pg_restore \
 ```bash
 createdb -h <主机> -p <端口> -U <用户> <目标数据库>
 ```
+
+- `-d <目标数据库>` 可以填任意你想恢复到的数据库名，不必和 dump 文件对应的原始数据库同名。
+- 如果只是想测试恢复能力，建议先创建一个单独的测试库，例如 `app_restore_test`，再把备份恢复进去。
+- 如果你希望恢复到自己指定的数据库名，不要加 `--create`；`pg_restore --create` 会按备份里记录的原始数据库名创建并恢复。
 
 **恢复 MongoDB**
 
@@ -239,3 +244,23 @@ mongorestore \
 
 - `--drop` 表示恢复前先删除已存在的集合；如果你不希望覆盖现有数据，请去掉它。
 - 如果你使用的是 `mongodb.uri` 方式连接，也可以直接写成 `mongorestore --uri '<连接串>' --drop --archive=...`；`gzip` 文件额外加上 `--gzip`。
+- 默认会按备份中的原始数据库名恢复；如果只是想测试恢复能力，建议恢复到一个新的数据库名，避免覆盖原库。
+
+例如，备份文件是 `./mongodb_prod/app.archive.gz`，原始数据库名是 `app`，如果你想恢复到 `app_restore_test`，可以这样写：
+
+```bash
+mongorestore \
+  --host <主机> \
+  --port <端口> \
+  --username <用户> \
+  --password '<密码>' \
+  --authenticationDatabase <认证库> \
+  --drop \
+  --gzip \
+  --nsFrom='app.*' \
+  --nsTo='app_restore_test.*' \
+  --archive=./mongodb_prod/app.archive.gz
+```
+
+- 这里的 `--nsFrom='app.*' --nsTo='app_restore_test.*'` 表示把原来属于 `app` 数据库的集合，恢复到 `app_restore_test`。
+- 如果备份文件不是 gzip 格式，去掉 `--gzip` 即可。

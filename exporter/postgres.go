@@ -1,4 +1,4 @@
-package backupsource
+package exporter
 
 import (
 	"path/filepath"

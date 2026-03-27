@@ -1,4 +1,4 @@
-package backupsource
+package exporter
 
 type pathSource struct {
 	path string

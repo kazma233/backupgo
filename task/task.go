@@ -1,8 +1,8 @@
 package task
 
 import (
-	"backupgo/backupsource"
 	"backupgo/config"
+	"backupgo/exporter"
 	"backupgo/notice"
 	"backupgo/oss"
 	"backupgo/state"
@@ -116,11 +116,11 @@ func (c *TaskHolder) backupWithLogger() error {
 			}
 		}
 
-		prepared, err := backupsource.Prepare(c.ID, conf, c.logger)
+		prepared, err := exporter.Prepare(c.ID, conf, c.logger)
 		if err != nil {
 			return err
 		}
-		defer backupsource.Cleanup(c.logger, prepared)
+		defer exporter.Cleanup(c.logger, prepared)
 
 		c.logger.LogInfo("备份路径: %s", prepared.Path)
 
