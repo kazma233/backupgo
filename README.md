@@ -70,6 +70,7 @@ backup:
 
 ``` bash
 # 构建
+# go env -w GOPROXY=https://goproxy.cn,direct
 go build -o backupgo .
 
 # 前台启动调度器

@@ -1,1 +1,0 @@
-pg_restore -h <主机名> -U <用户名> -d <目标数据库> -c db.dump
