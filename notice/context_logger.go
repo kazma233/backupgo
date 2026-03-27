@@ -130,10 +130,6 @@ func (tl *TaskLogger) LogCompressed(total int64) {
 }
 
 func (tl *TaskLogger) LogUpload(bucket string, key string) {
-	if bucket == "" {
-		bucket = "OSS"
-	}
-
 	message := fmt.Sprintf("上传完成: %s", key)
 	timestamp := time.Now()
 	tl.appendEntry(LogEntry{

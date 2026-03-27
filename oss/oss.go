@@ -4,7 +4,6 @@ import (
 	"backupgo/config"
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -15,77 +14,72 @@ import (
 var ErrCoolDown = errors.New("fast upload cool down")
 
 type (
+	BucketType string
+
 	OssClient struct {
-		client          *oss.Client
 		bucketName      string
-		fastEndpoint    string
+		client          *oss.Client
 		fastClient      *oss.Client
 		lastSuccessTime time.Time
 	}
+)
 
-	UploadNoticeFunc func(string)
+var (
+	NORMAL BucketType = "NORMAL"
+	FAST   BucketType = "FAST"
 )
 
 func CreateOSSClient(cfg config.OssConfig) *OssClient {
 	client := oss.NewClient(oss.LoadDefaultConfig().
-		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret, "")).
-		WithEndpoint(cfg.Endpoint))
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret)).
+		WithRegion(cfg.Region))
+
+	fastClient := oss.NewClient(oss.LoadDefaultConfig().
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret)).
+		WithRegion(cfg.Region).
+		WithUseAccelerateEndpoint(true))
 
 	oc := &OssClient{
-		client:       client,
-		bucketName:   cfg.BucketName,
-		fastEndpoint: cfg.FastEndpoint,
+		client:     client,
+		fastClient: fastClient,
+		bucketName: cfg.BucketName,
 	}
 
-	if cfg.FastEndpoint != "" {
-		oc.fastClient = oss.NewClient(oss.LoadDefaultConfig().
-			WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret, "")).
-			WithEndpoint(cfg.FastEndpoint))
-	}
-
-	log.Printf("oss client init done: bucket=%s, slow=%s, fast=%s", cfg.BucketName, cfg.Endpoint, cfg.FastEndpoint)
+	log.Printf("oss client init done: bucket %s", cfg.BucketName)
 
 	return oc
 }
 
-func (oc *OssClient) Upload(objKey, filePath string, noticeFunc UploadNoticeFunc) (err error) {
-	if oc.client == nil {
-		return errors.New("client not init")
-	}
-
-	err = oc.upload(oc.client, objKey, filePath, noticeFunc)
-	if err == nil {
-		return
-	}
-
-	if !oc.canUseFastBucket() || oc.fastClient == nil {
-		noticeFunc("fast bucket in 3-day cooldown")
-		return ErrCoolDown
-	}
-
-	err = oc.upload(oc.fastClient, objKey, filePath, noticeFunc)
-	if err == nil {
-		return
-	}
-
-	return
+func (oc *OssClient) BucketName() string {
+	return oc.bucketName
 }
 
-func (oc *OssClient) upload(client *oss.Client, objKey, filePath string, noticeFunc UploadNoticeFunc) error {
-	noticeFunc(fmt.Sprintf("uploading to %s", objKey))
-	_, err := client.PutObjectFromFile(context.Background(), &oss.PutObjectRequest{
-		Bucket: oss.Ptr(oc.bucketName),
-		Key:    oss.Ptr(objKey),
-	}, filePath)
-	if err != nil {
-		noticeFunc(fmt.Sprintf("upload failed: %v", err))
-		return err
+func (oc *OssClient) Upload(objKey, filePath string) (BucketType, error) {
+	err := upload(oc.client, oc.bucketName, objKey, filePath)
+	if err == nil {
+		oc.setLastSuccessTime()
+		return NORMAL, nil
 	}
 
-	noticeFunc(fmt.Sprintf("upload success: %s", objKey))
-	oc.setLastSuccessTime()
+	if !oc.canUseFastBucket() {
+		return NORMAL, ErrCoolDown
+	}
 
-	return nil
+	err = upload(oc.fastClient, oc.bucketName, objKey, filePath)
+	if err == nil {
+		oc.setLastSuccessTime()
+	}
+
+	return FAST, err
+}
+
+func upload(client *oss.Client, bucketName, objKey, filePath string) error {
+	_, err := client.PutObjectFromFile(context.Background(), &oss.PutObjectRequest{
+		Bucket: oss.Ptr(bucketName),
+		Key:    oss.Ptr(objKey),
+	}, filePath)
+
+	return err
 }
 
 func (oc *OssClient) HasError(err error) bool {

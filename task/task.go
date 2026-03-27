@@ -157,21 +157,18 @@ func (c *TaskHolder) uploadBackup(zipFile string) error {
 	return c.logger.ExecuteStep("上传到OSS", func() error {
 		c.logger.LogInfo("文件: %s", objKey)
 
-		err := ossClient.Upload(objKey, zipFile, func(status string) {
-			c.logger.LogInfo("上传进度: %s", status)
-		})
-
+		bt, err := ossClient.Upload(objKey, zipFile)
 		if ossClient.HasError(err) {
-			c.logger.LogError(err, "上传失败")
+			c.logger.LogInfo("使用 %s 上传失败，原因: %v", bt, err)
 			return err
 		}
 
 		if ossClient.HasCoolDownError(err) {
-			c.logger.LogInfo("上传因冷却期延迟: %s", objKey)
+			c.logger.LogInfo("上传失败，原因：上传因冷却期延迟: %s", objKey)
 			return nil
 		}
 
-		c.logger.LogUpload("OSS", objKey)
+		c.logger.LogUpload(ossClient.BucketName(), objKey)
 		return nil
 	})
 }
