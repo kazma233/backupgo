@@ -3,6 +3,7 @@ package exporter
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -46,6 +47,27 @@ func runCommandToFile(spec commandSpec, targetFile string) error {
 
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(targetFile)
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return fmt.Errorf("%w: %s", err, message)
+		}
+		return fmt.Errorf("%w: command failed without stderr output", err)
+	}
+
+	return nil
+}
+
+func runCommand(spec commandSpec) error {
+	cmd := exec.Command(spec.Name, spec.Args...)
+	if len(spec.Env) > 0 {
+		cmd.Env = append(os.Environ(), spec.Env...)
+	}
+	cmd.Stdout = io.Discard
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message != "" {
 			return fmt.Errorf("%w: %s", err, message)

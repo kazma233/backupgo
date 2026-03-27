@@ -112,6 +112,37 @@ backup:
 	}
 }
 
+func TestParseConfigWithDockerVolumeSource(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'docker-volume'
+    docker_volume:
+      volume: 'app-data'
+`)
+
+	cfg, err := ParseConfig(configBlob)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	task, ok := cfg.FindBackupByID("docker-volume")
+	if !ok {
+		t.Fatal("expected docker-volume task to be present")
+	}
+	if task.GetType() != BackupTypeDockerVolume {
+		t.Fatalf("unexpected backup type: %s", task.GetType())
+	}
+	if task.DockerVolume == nil {
+		t.Fatal("expected docker volume config to be present")
+	}
+	if task.DockerVolume.Volume != "app-data" {
+		t.Fatalf("unexpected docker volume name: %s", task.DockerVolume.Volume)
+	}
+	if got := task.DockerVolume.GetImage(); got != "busybox:latest" {
+		t.Fatalf("unexpected default docker volume image: %s", got)
+	}
+}
+
 func TestParseConfigRejectsMultipleSources(t *testing.T) {
 	configBlob := []byte(`
 backup:
@@ -125,6 +156,20 @@ backup:
 
 	if _, err := ParseConfig(configBlob); err == nil {
 		t.Fatal("expected ParseConfig to fail for multiple sources")
+	}
+}
+
+func TestParseConfigRejectsDockerVolumeWithoutVolume(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'docker-volume'
+    type: 'docker_volume'
+    docker_volume:
+      image: 'alpine:3.20'
+`)
+
+	if _, err := ParseConfig(configBlob); err == nil {
+		t.Fatal("expected ParseConfig to fail for docker_volume without volume")
 	}
 }
 

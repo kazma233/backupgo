@@ -1,6 +1,6 @@
 # backupgo
 
-定时将你的目录/文件压缩，然后上传到OSS上。支持前置/后置自定义命令，也支持内置 Postgres 和 MongoDB 备份源。
+定时将你的目录/文件压缩，然后上传到OSS上。支持前置/后置自定义命令，也支持内置 Postgres、MongoDB 和 Docker volume 备份源。
 
 # 使用
 
@@ -64,6 +64,13 @@ backup:
       databases:
         - 'app'
         - 'logs'
+
+  - id: 'app_volume'
+    type: 'docker_volume'
+    backup_task: '0 10 1 * * ?'
+    docker_volume:
+      volume: 'app_data'
+      image: 'busybox:latest'
 ```
 
 ## 启动脚本
@@ -117,11 +124,11 @@ go build -o backupgo .
 - 顶层 `backup` 必填，至少需要定义一个任务。
 - `backup` 每一项表示一个备份任务。
 - 每个备份任务都必须填写唯一的 `id`。
-- 通用字段 `type` 可选，支持 `path`、`postgres`、`mongodb`，默认是 `path`。
+- 通用字段 `type` 可选，支持 `path`、`postgres`、`mongodb`、`docker_volume`，默认是 `path`。
 - 通用字段 `backup_task` 可选，默认是 `0 25 0 * * ?`。
 - 通用字段 `before_command` 可选，在备份开始前执行。
 - 通用字段 `after_command` 可选，在压缩完成后执行。
-- 一个任务只能配置一种备份源，不能同时配置 `backup_path`、`postgres`、`mongodb`。
+- 一个任务只能配置一种备份源，不能同时配置 `backup_path`、`postgres`、`mongodb`、`docker_volume`。
 
 **backup.path**
 
@@ -169,18 +176,30 @@ go build -o backupgo .
 - `mongodb.password` 是可选的；如果服务端允许无认证访问，或者你通过 `mongodb.uri` 使用了不依赖密码的认证方式，可以不填。
 - 如果 MongoDB 开启了用户名密码认证，并且未通过 `mongodb.uri` 提供其他认证方式，则需要填写 `mongodb.username` 和 `mongodb.password`。
 
+**backup.docker_volume**
+
+- 适用于 `type: docker_volume`。
+- `docker_volume` 节点必填。
+- `docker_volume.volume` 必填，表示要备份的 Docker volume 名称。
+- `docker_volume.image` 可选，默认 `busybox:latest`，用于启动临时 helper 容器执行 `tar`。
+- 内置模式会先执行 `docker volume inspect` 确认 volume 存在，再通过 `docker run` 把 volume 打包到临时目录中的 tar 文件，然后复用现有压缩和上传逻辑。
+- 依赖宿主机可执行 `docker`，并要求 helper 镜像内可执行 `tar`。
+- 如果该 volume 被正在运行的服务使用，数据一致性由你的 `before_command` / `after_command` 负责，例如停容器、flush 数据或切只读。
+
 # 恢复示例
 
-先从 OSS 下载对应的备份 zip 文件并解压。内置数据库备份解压后通常会得到这样的文件：
+先从 OSS 下载对应的备份 zip 文件并解压。内置备份解压后通常会得到这样的文件：
 
 - Postgres: `<backup-id>/<database>.dump`
 - MongoDB: `<backup-id>/<database>.archive` 或 `<backup-id>/<database>.archive.gz`
+- Docker volume: `<backup-id>/<volume>.tar`
 
-例如任务 ID 为 `postgres_prod` / `mongodb_prod`，解压后可能得到：
+例如任务 ID 为 `postgres_prod` / `mongodb_prod` / `app_volume`，解压后可能得到：
 
 ```text
 postgres_prod/app.dump
 mongodb_prod/app.archive.gz
+app_volume/app_data.tar
 ```
 
 **恢复 Postgres**

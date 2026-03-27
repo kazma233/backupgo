@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	BackupTypePath     = "path"
-	BackupTypePostgres = "postgres"
-	BackupTypeMongoDB  = "mongodb"
+	BackupTypePath         = "path"
+	BackupTypePostgres     = "postgres"
+	BackupTypeMongoDB      = "mongodb"
+	BackupTypeDockerVolume = "docker_volume"
 
 	ExecModeLocal  = "local"
 	ExecModeDocker = "docker"
@@ -32,14 +33,15 @@ type (
 	}
 
 	BackupConfig struct {
-		ID         string                `yaml:"id"`
-		Type       string                `yaml:"type"`
-		BeforeCmd  string                `yaml:"before_command"`
-		BackupPath string                `yaml:"backup_path"`
-		AfterCmd   string                `yaml:"after_command"`
-		BackupTask string                `yaml:"backup_task"`
-		Postgres   *PostgresBackupConfig `yaml:"postgres"`
-		MongoDB    *MongoBackupConfig    `yaml:"mongodb"`
+		ID           string                    `yaml:"id"`
+		Type         string                    `yaml:"type"`
+		BeforeCmd    string                    `yaml:"before_command"`
+		BackupPath   string                    `yaml:"backup_path"`
+		AfterCmd     string                    `yaml:"after_command"`
+		BackupTask   string                    `yaml:"backup_task"`
+		Postgres     *PostgresBackupConfig     `yaml:"postgres"`
+		MongoDB      *MongoBackupConfig        `yaml:"mongodb"`
+		DockerVolume *DockerVolumeBackupConfig `yaml:"docker_volume"`
 	}
 
 	PostgresBackupConfig struct {
@@ -65,6 +67,11 @@ type (
 		Databases    []string `yaml:"databases"`
 		Gzip         bool     `yaml:"gzip"`
 		ExtraArgs    []string `yaml:"extra_args"`
+	}
+
+	DockerVolumeBackupConfig struct {
+		Volume string `yaml:"volume"`
+		Image  string `yaml:"image"`
 	}
 
 	OssConfig struct {
@@ -106,6 +113,9 @@ func (c BackupConfig) GetType() string {
 	if c.MongoDB != nil {
 		return BackupTypeMongoDB
 	}
+	if c.DockerVolume != nil {
+		return BackupTypeDockerVolume
+	}
 	return BackupTypePath
 }
 
@@ -125,6 +135,9 @@ func (c BackupConfig) Validate() error {
 	if c.MongoDB != nil {
 		sourceCount++
 	}
+	if c.DockerVolume != nil {
+		sourceCount++
+	}
 
 	if sourceCount == 0 {
 		return fmt.Errorf("backup %s must configure one source", taskID)
@@ -138,8 +151,8 @@ func (c BackupConfig) Validate() error {
 		if strings.TrimSpace(c.BackupPath) == "" {
 			return fmt.Errorf("backup %s backup_path can not be empty", taskID)
 		}
-		if c.Postgres != nil || c.MongoDB != nil {
-			return fmt.Errorf("backup %s path source can not be combined with database source", taskID)
+		if c.Postgres != nil || c.MongoDB != nil || c.DockerVolume != nil {
+			return fmt.Errorf("backup %s path source can not be combined with another source", taskID)
 		}
 	case BackupTypePostgres:
 		if c.Postgres == nil {
@@ -153,6 +166,13 @@ func (c BackupConfig) Validate() error {
 			return fmt.Errorf("backup %s mongodb config can not be empty", taskID)
 		}
 		if err := c.MongoDB.Validate(taskID); err != nil {
+			return err
+		}
+	case BackupTypeDockerVolume:
+		if c.DockerVolume == nil {
+			return fmt.Errorf("backup %s docker_volume config can not be empty", taskID)
+		}
+		if err := c.DockerVolume.Validate(taskID); err != nil {
 			return err
 		}
 	default:
@@ -227,6 +247,23 @@ func (c MongoBackupConfig) GetMode() string {
 		return ExecModeLocal
 	}
 	return mode
+}
+
+func (c DockerVolumeBackupConfig) Validate(taskID string) error {
+	if strings.TrimSpace(c.Volume) == "" {
+		return fmt.Errorf("backup %s docker_volume.volume can not be empty", taskID)
+	}
+
+	return nil
+}
+
+func (c DockerVolumeBackupConfig) GetImage() string {
+	image := strings.TrimSpace(c.Image)
+	if image == "" {
+		return "busybox:latest"
+	}
+
+	return image
 }
 
 func InitConfig() {

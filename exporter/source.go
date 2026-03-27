@@ -31,6 +31,8 @@ func New(taskID string, conf config.BackupConfig, logger Logger) (Source, error)
 		return postgresBackupSource{taskID: taskID, logger: logger, conf: *conf.Postgres}, nil
 	case config.BackupTypeMongoDB:
 		return mongoBackupSource{taskID: taskID, logger: logger, conf: *conf.MongoDB}, nil
+	case config.BackupTypeDockerVolume:
+		return dockerVolumeSource{taskID: taskID, logger: logger, conf: *conf.DockerVolume}, nil
 	default:
 		return nil, fmt.Errorf("unsupported backup type: %s", conf.GetType())
 	}
