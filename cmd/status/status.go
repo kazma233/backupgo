@@ -26,16 +26,39 @@ func StatusCommand() *cli.Command {
 }
 
 func runStatus() error {
-	showPID()
+	pidFile, err := consts.PIDFilePath()
+	if err != nil {
+		return err
+	}
+
+	logFile, err := consts.LogFilePath()
+	if err != nil {
+		return err
+	}
+
+	stateFile, err := consts.StateFilePath()
+	if err != nil {
+		return err
+	}
+
+	showPID(pidFile)
+	fmt.Printf("PID file: %s\n", pidFile)
+	fmt.Printf("Log file: %s\n", logFile)
+	fmt.Printf("State file: %s\n", stateFile)
 	fmt.Println()
 	listTasks()
 	return nil
 }
 
-func showPID() {
-	pid, err := readPID()
+func showPID(pidFile string) {
+	pid, err := readPID(pidFile)
 	if err != nil {
-		fmt.Println("Scheduler status: not running (no PID file)")
+		if os.IsNotExist(err) {
+			fmt.Println("Scheduler status: not running (no PID file)")
+			return
+		}
+
+		fmt.Printf("Scheduler status: unknown (read PID file failed: %v)\n", err)
 		return
 	}
 
@@ -53,17 +76,18 @@ func showPID() {
 	fmt.Printf("Scheduler status: running (PID %d)\n", pid)
 }
 
-func readPID() (int, error) {
-	pidFile, err := consts.PIDFilePath()
-	if err != nil {
-		return 0, err
-	}
-
+func readPID(pidFile string) (int, error) {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(string(data)))
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("parse pid file %s failed: %w", pidFile, err)
+	}
+
+	return pid, nil
 }
 
 func listTasks() {

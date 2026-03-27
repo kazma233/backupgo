@@ -1,14 +1,11 @@
 package state
 
 import (
+	"backupgo/pkg/consts"
 	"encoding/json"
 	"os"
 	"sync"
 	"time"
-)
-
-const (
-	stateFile = "backupgo.state.json"
 )
 
 type TaskState struct {
@@ -37,6 +34,11 @@ func GetState() *State {
 }
 
 func (s *State) load() {
+	stateFile, err := consts.StateFilePath()
+	if err != nil {
+		return
+	}
+
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
 		return
@@ -53,6 +55,15 @@ func (s *State) load() {
 }
 
 func (s *State) save() {
+	if _, err := consts.EnsureStateDir(); err != nil {
+		return
+	}
+
+	stateFile, err := consts.StateFilePath()
+	if err != nil {
+		return
+	}
+
 	s.mu.RLock()
 	data, err := json.MarshalIndent(s.tasks, "", "  ")
 	s.mu.RUnlock()
