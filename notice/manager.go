@@ -2,7 +2,6 @@ package notice
 
 import (
 	"log"
-	"time"
 )
 
 type Notifier interface {
@@ -33,9 +32,8 @@ func (m *NoticeManager) AddNotifier(n Notifier) {
 	m.notifiers = append(m.notifiers, n)
 }
 
-// NoticeEntries 根据日志条目发送格式化的消息
-func (m *NoticeManager) NoticeEntries(taskID string, startTime time.Time, entries []LogEntry) {
-	summary := buildTaskSummary(taskID, startTime, entries)
+// NoticeSummary 根据任务摘要发送格式化的消息
+func (m *NoticeManager) NoticeSummary(summary TaskSummary) {
 	messages := make(map[FormatType]string)
 
 	for _, n := range m.notifiers {

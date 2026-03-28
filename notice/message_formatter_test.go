@@ -1,88 +1,82 @@
 package notice
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestTaskLoggerAddsStructuredEntries(t *testing.T) {
+func TestTaskLoggerTracksSummaryAndLines(t *testing.T) {
 	logger := NewTaskLogger("task-1")
 	logger.StartNewTask()
+	logger.StartStage("备份")
 	logger.LogCompressed(2048)
 	logger.LogUpload("archive", "demo.zip")
+	logger.LogError(assertError("boom"), "上传失败")
+	logger.FinishStage("备份")
 
-	entries := logger.GetEntries()
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
+	summary := logger.Summary()
+	if summary.TaskID != "task-1" {
+		t.Fatalf("expected task id task-1, got %q", summary.TaskID)
+	}
+	if !summary.HasErrors {
+		t.Fatal("expected summary to be marked as failed")
+	}
+	if summary.ErrorCount != 1 {
+		t.Fatalf("expected error count 1, got %d", summary.ErrorCount)
+	}
+	if summary.CompressedSize != "2.0 KB" {
+		t.Fatalf("expected compressed size 2.0 KB, got %q", summary.CompressedSize)
+	}
+	if len(summary.Uploads) != 1 {
+		t.Fatalf("expected 1 upload, got %d", len(summary.Uploads))
+	}
+	if summary.Uploads[0].Bucket != "archive" || summary.Uploads[0].Key != "demo.zip" {
+		t.Fatalf("unexpected upload summary: %+v", summary.Uploads[0])
+	}
+	if summary.FirstError != "上传失败" {
+		t.Fatalf("expected first error 上传失败, got %q", summary.FirstError)
 	}
 
-	if entries[0].EntryType != EntryTypeCompressed {
-		t.Fatalf("expected first entry type %q, got %q", EntryTypeCompressed, entries[0].EntryType)
+	lines := logger.Lines()
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 log lines, got %d", len(lines))
 	}
-	if entries[0].CompressedSize != "2.0 KB" {
-		t.Fatalf("expected compressed size 2.0 KB, got %q", entries[0].CompressedSize)
-	}
-
-	if entries[1].EntryType != EntryTypeUpload {
-		t.Fatalf("expected second entry type %q, got %q", EntryTypeUpload, entries[1].EntryType)
-	}
-	if entries[1].UploadBucket != "archive" || entries[1].UploadKey != "demo.zip" {
-		t.Fatalf("unexpected upload entry: %+v", entries[1])
+	for _, want := range []string{
+		"【task-1】备份 开始",
+		"[task-1] 压缩完成，总大小: 2.0 KB",
+		"[task-1] 上传完成: demo.zip",
+		"[task-1] 上传失败: boom",
+		"【task-1】备份 完成",
+	} {
+		if !containsLine(lines, want) {
+			t.Fatalf("expected lines to contain %q, got %#v", want, lines)
+		}
 	}
 }
 
-func TestBuildTaskSummaryUsesStructuredEntries(t *testing.T) {
-	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	entries := []LogEntry{
-		{EntryType: EntryTypeStep, Timestamp: start.Add(time.Second), StepName: "备份", StepStatus: StepStatusStart, Message: "开始: 备份"},
-		{EntryType: EntryTypeCompressed, Timestamp: start.Add(2 * time.Second), Message: "压缩完成，总大小: 12.0 MB", CompressedSize: "12.0 MB"},
-		{EntryType: EntryTypeUpload, Timestamp: start.Add(3 * time.Second), Message: "上传完成: demo.zip", UploadBucket: "OSS", UploadKey: "demo.zip"},
-		{EntryType: EntryTypeError, Timestamp: start.Add(4 * time.Second), Message: "上传失败", Error: errors.New("boom")},
-	}
+func TestTaskLoggerFailStageSetsFailureWithoutDetailedErrorLog(t *testing.T) {
+	logger := NewTaskLogger("task-1")
+	logger.StartNewTask()
+	logger.StartStage("上传到OSS")
+	logger.FailStage("上传到OSS", assertError("network"))
 
-	summary := buildTaskSummary("task-1", start, entries)
-	if summary.taskID != "task-1" {
-		t.Fatalf("expected task id task-1, got %q", summary.taskID)
+	summary := logger.Summary()
+	if !summary.HasErrors {
+		t.Fatal("expected failed summary")
 	}
-	if summary.statusText != "失败" || summary.statusIcon != "❌" {
-		t.Fatalf("expected failed status, got %q %q", summary.statusIcon, summary.statusText)
-	}
-	if summary.duration != 4*time.Second {
-		t.Fatalf("expected duration 4s, got %s", summary.duration)
-	}
-	if summary.stepCount != 1 {
-		t.Fatalf("expected step count 1, got %d", summary.stepCount)
-	}
-	if summary.errorCount != 1 {
-		t.Fatalf("expected error count 1, got %d", summary.errorCount)
-	}
-	if summary.compressedSize != "12.0 MB" {
-		t.Fatalf("expected compressed size 12.0 MB, got %q", summary.compressedSize)
-	}
-	if len(summary.uploads) != 1 {
-		t.Fatalf("expected 1 upload, got %d", len(summary.uploads))
-	}
-	if summary.uploads[0].bucket != "OSS" || summary.uploads[0].key != "demo.zip" {
-		t.Fatalf("unexpected upload info: %+v", summary.uploads[0])
-	}
-	if summary.firstError != "上传失败" {
-		t.Fatalf("expected first error 上传失败, got %q", summary.firstError)
+	if summary.FirstError != "失败: 上传到OSS" {
+		t.Fatalf("expected first error to fall back to stage failure, got %q", summary.FirstError)
 	}
 }
 
 func TestFormatterRendersPlainAndHTML(t *testing.T) {
-	summary := taskSummary{
-		taskID:         "task-1",
-		statusIcon:     "✅",
-		statusText:     "成功",
-		duration:       2*time.Minute + 3*time.Second,
-		stepCount:      4,
-		errorCount:     0,
-		compressedSize: "10.0 MB",
-		uploads: []uploadInfo{
-			{bucket: "OSS", key: "demo.zip"},
+	summary := TaskSummary{
+		TaskID:         "task-1",
+		Duration:       2*time.Minute + 3*time.Second,
+		CompressedSize: "10.0 MB",
+		Uploads: []UploadSummary{
+			{Bucket: "OSS", Key: "demo.zip"},
 		},
 	}
 
@@ -97,6 +91,9 @@ func TestFormatterRendersPlainAndHTML(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("plain output missing %q: %s", want, plain)
 		}
+	}
+	if strings.Contains(plain, "统计") {
+		t.Fatalf("plain output should not contain step statistics: %s", plain)
 	}
 
 	html := newFormatter(FormatTypeHTML).FormatSummary(summary)
@@ -115,24 +112,21 @@ func TestFormatterRendersPlainAndHTML(t *testing.T) {
 }
 
 func TestFormatterEscapesHTMLContent(t *testing.T) {
-	summary := taskSummary{
-		taskID:         `task<&>`,
-		statusIcon:     "❌",
-		statusText:     `失败<&>`,
-		duration:       5 * time.Second,
-		stepCount:      1,
-		errorCount:     1,
-		compressedSize: `10<&> MB`,
-		uploads: []uploadInfo{
-			{bucket: `OSS&1`, key: `demo<zip>`},
+	summary := TaskSummary{
+		TaskID:         `task<&>`,
+		Duration:       5 * time.Second,
+		HasErrors:      true,
+		CompressedSize: `10<&> MB`,
+		Uploads: []UploadSummary{
+			{Bucket: `OSS&1`, Key: `demo<zip>`},
 		},
-		firstError: `bad <error> & fail`,
+		FirstError: `bad <error> & fail`,
 	}
 
 	html := newFormatter(FormatTypeHTML).FormatSummary(summary)
 	for _, want := range []string{
 		"<code>task&lt;&amp;&gt;</code>",
-		"<div>❌ <b>状态:</b> 失败&lt;&amp;&gt;</div>",
+		"<div>❌ <b>状态:</b> 失败</div>",
 		"<div>📦 <b>压缩:</b> 10&lt;&amp;&gt; MB</div>",
 		"<div>☁️ <b>上传至:</b> <code>OSS&amp;1/demo&lt;zip&gt;</code></div>",
 		"<div>❌ <b>错误:</b> <code>bad &lt;error&gt; &amp; fail</code></div>",
@@ -144,7 +138,6 @@ func TestFormatterEscapesHTMLContent(t *testing.T) {
 
 	for _, raw := range []string{
 		`task<&>`,
-		`失败<&>`,
 		`10<&> MB`,
 		`OSS&1/demo<zip>`,
 		`bad <error> & fail`,
@@ -153,4 +146,23 @@ func TestFormatterEscapesHTMLContent(t *testing.T) {
 			t.Fatalf("html output should not contain raw content %q: %s", raw, html)
 		}
 	}
+}
+
+func containsLine(lines []string, want string) bool {
+	for _, line := range lines {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
+func assertError(message string) error {
+	return testError(message)
+}
+
+type testError string
+
+func (e testError) Error() string {
+	return string(e)
 }

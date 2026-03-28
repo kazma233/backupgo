@@ -13,8 +13,6 @@ import (
 
 // Logger 定义备份源执行过程中依赖的日志能力。
 type Logger interface {
-	// ExecuteStep 包裹一个带步骤名的执行单元，并返回该步骤的执行结果。
-	ExecuteStep(stepName string, fn func() error) error
 	// LogInfo 记录普通信息日志。
 	LogInfo(format string, args ...interface{})
 	// LogError 记录错误日志。

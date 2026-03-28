@@ -5,216 +5,129 @@ import (
 	"time"
 )
 
-type EntryType string
+type UploadSummary struct {
+	Bucket string
+	Key    string
+}
 
-const (
-	EntryTypeStep       EntryType = "step"
-	EntryTypeProgress   EntryType = "progress"
-	EntryTypeInfo       EntryType = "info"
-	EntryTypeError      EntryType = "error"
-	EntryTypeCompressed EntryType = "compressed"
-	EntryTypeUpload     EntryType = "upload"
-)
-
-type StepStatus string
-
-const (
-	StepStatusStart   StepStatus = "start"
-	StepStatusSuccess StepStatus = "success"
-	StepStatusFailed  StepStatus = "failed"
-)
-
-type LogEntry struct {
-	EntryType EntryType
-	Timestamp time.Time
-	Message   string
-
-	StepName   string
-	StepStatus StepStatus
-
-	FilePath   string
-	Processed  int64
-	Total      int64
-	Percentage float64
-
+type TaskSummary struct {
+	TaskID         string
+	Duration       time.Duration
+	HasErrors      bool
+	ErrorCount     int
 	CompressedSize string
-	UploadBucket   string
-	UploadKey      string
-
-	Error error
-}
-
-type ConsoleLogger struct {
-	taskID string
-}
-
-func NewConsoleLogger(taskID string) *ConsoleLogger {
-	return &ConsoleLogger{taskID: taskID}
-}
-
-func (cl *ConsoleLogger) Log(message string) {
-	fmt.Printf("[%s] %s\n", cl.taskID, message)
-}
-
-func (cl *ConsoleLogger) LogStep(stepName string, status string) {
-	fmt.Printf("【%s】%s %s\n", cl.taskID, stepName, status)
-}
-
-func (cl *ConsoleLogger) LogProgress(filePath string, processed, total int64, percentage float64) {
-	fmt.Printf("[%s] 进度: %s - %s / %s (%.1f%%)\n",
-		cl.taskID, filePath, FormatBytes(processed), FormatBytes(total), percentage)
+	Uploads        []UploadSummary
+	FirstError     string
 }
 
 type TaskLogger struct {
-	startTime     time.Time
-	entries       []LogEntry
-	consoleLogger *ConsoleLogger
+	taskID         string
+	startTime      time.Time
+	lastEventTime  time.Time
+	lines          []string
+	hasErrors      bool
+	errorCount     int
+	firstError     string
+	compressedSize string
+	uploads        []UploadSummary
 }
 
 func NewTaskLogger(taskID string) *TaskLogger {
-	return &TaskLogger{
-		startTime:     time.Now(),
-		entries:       make([]LogEntry, 0),
-		consoleLogger: NewConsoleLogger(taskID),
-	}
+	logger := &TaskLogger{taskID: taskID}
+	logger.StartNewTask()
+	return logger
 }
 
 func (tl *TaskLogger) LogInfo(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType: EntryTypeInfo,
-		Timestamp: timestamp,
-		Message:   message,
-	})
-	tl.consoleLogger.Log(message)
+	tl.appendLine(fmt.Sprintf("[%s] %s", tl.taskID, message))
 }
 
 func (tl *TaskLogger) LogError(err error, format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType: EntryTypeError,
-		Timestamp: timestamp,
-		Message:   message,
-		Error:     err,
-	})
-	tl.consoleLogger.Log(fmt.Sprintf("%s: %v", message, err))
+	tl.hasErrors = true
+	tl.errorCount++
+	if tl.firstError == "" {
+		tl.firstError = message
+	}
+	tl.appendLine(fmt.Sprintf("[%s] %s: %v", tl.taskID, message, err))
 }
 
 func (tl *TaskLogger) LogProgress(filePath string, processed, total int64, percentage float64) {
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType:  EntryTypeProgress,
-		Timestamp:  timestamp,
-		FilePath:   filePath,
-		Processed:  processed,
-		Total:      total,
-		Percentage: percentage,
-		Message:    fmt.Sprintf("进度: %s (%.1f%%)", filePath, percentage),
-	})
-	tl.consoleLogger.LogProgress(filePath, processed, total, percentage)
+	tl.appendLine(fmt.Sprintf("[%s] 进度: %s - %s / %s (%.1f%%)",
+		tl.taskID, filePath, FormatBytes(processed), FormatBytes(total), percentage))
 }
 
 func (tl *TaskLogger) LogCompressed(total int64) {
 	size := FormatBytes(total)
-	message := fmt.Sprintf("压缩完成，总大小: %s", size)
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType:      EntryTypeCompressed,
-		Timestamp:      timestamp,
-		Message:        message,
-		CompressedSize: size,
-	})
-	tl.consoleLogger.Log(message)
+	tl.compressedSize = size
+	tl.appendLine(fmt.Sprintf("[%s] 压缩完成，总大小: %s", tl.taskID, size))
 }
 
 func (tl *TaskLogger) LogUpload(bucket string, key string) {
-	message := fmt.Sprintf("上传完成: %s", key)
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType:    EntryTypeUpload,
-		Timestamp:    timestamp,
-		Message:      message,
-		UploadBucket: bucket,
-		UploadKey:    key,
+	tl.uploads = append(tl.uploads, UploadSummary{
+		Bucket: bucket,
+		Key:    key,
 	})
-	tl.consoleLogger.Log(message)
+	tl.appendLine(fmt.Sprintf("[%s] 上传完成: %s", tl.taskID, key))
 }
 
-func (tl *TaskLogger) GetEntries() []LogEntry {
-	entries := make([]LogEntry, len(tl.entries))
-	copy(entries, tl.entries)
-	return entries
+func (tl *TaskLogger) StartStage(stageName string) {
+	tl.appendLine(fmt.Sprintf("【%s】%s 开始", tl.taskID, stageName))
 }
 
-func (tl *TaskLogger) GetStartTime() time.Time {
-	return tl.startTime
+func (tl *TaskLogger) FinishStage(stageName string) {
+	tl.appendLine(fmt.Sprintf("【%s】%s 完成", tl.taskID, stageName))
+}
+
+func (tl *TaskLogger) FailStage(stageName string, err error) {
+	tl.hasErrors = true
+	if tl.firstError == "" {
+		tl.firstError = fmt.Sprintf("失败: %s", stageName)
+	}
+	tl.appendLine(fmt.Sprintf("[%s] %s 失败: %v", tl.taskID, stageName, err))
+}
+
+func (tl *TaskLogger) Lines() []string {
+	lines := make([]string, len(tl.lines))
+	copy(lines, tl.lines)
+	return lines
+}
+
+func (tl *TaskLogger) Summary() TaskSummary {
+	uploads := make([]UploadSummary, len(tl.uploads))
+	copy(uploads, tl.uploads)
+
+	duration := time.Duration(0)
+	if !tl.lastEventTime.IsZero() {
+		duration = tl.lastEventTime.Sub(tl.startTime)
+	}
+
+	return TaskSummary{
+		TaskID:         tl.taskID,
+		Duration:       duration,
+		HasErrors:      tl.hasErrors,
+		ErrorCount:     tl.errorCount,
+		CompressedSize: tl.compressedSize,
+		Uploads:        uploads,
+		FirstError:     tl.firstError,
+	}
 }
 
 func (tl *TaskLogger) StartNewTask() {
-	tl.startTime = time.Now()
-	tl.entries = make([]LogEntry, 0)
+	now := time.Now()
+	tl.startTime = now
+	tl.lastEventTime = now
+	tl.lines = make([]string, 0)
+	tl.hasErrors = false
+	tl.errorCount = 0
+	tl.firstError = ""
+	tl.compressedSize = ""
+	tl.uploads = make([]UploadSummary, 0)
 }
 
-func (tl *TaskLogger) ExecuteStep(stepName string, fn func() error) (err error) {
-	tl.stepStart(stepName)
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic: %v", r)
-			tl.stepFailed(stepName, err)
-			return
-		}
-
-		if err != nil {
-			tl.stepFailed(stepName, err)
-			return
-		}
-
-		tl.stepSuccess(stepName)
-	}()
-
-	return fn()
-}
-
-func (tl *TaskLogger) appendEntry(entry LogEntry) {
-	tl.entries = append(tl.entries, entry)
-}
-
-func (tl *TaskLogger) stepStart(stepName string) {
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType:  EntryTypeStep,
-		Timestamp:  timestamp,
-		StepName:   stepName,
-		StepStatus: StepStatusStart,
-		Message:    fmt.Sprintf("开始: %s", stepName),
-	})
-	tl.consoleLogger.LogStep(stepName, "开始")
-}
-
-func (tl *TaskLogger) stepSuccess(stepName string) {
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType:  EntryTypeStep,
-		Timestamp:  timestamp,
-		StepName:   stepName,
-		StepStatus: StepStatusSuccess,
-		Message:    fmt.Sprintf("完成: %s", stepName),
-	})
-	tl.consoleLogger.LogStep(stepName, "完成")
-}
-
-func (tl *TaskLogger) stepFailed(stepName string, err error) {
-	timestamp := time.Now()
-	tl.appendEntry(LogEntry{
-		EntryType:  EntryTypeStep,
-		Timestamp:  timestamp,
-		StepName:   stepName,
-		StepStatus: StepStatusFailed,
-		Message:    fmt.Sprintf("失败: %s", stepName),
-		Error:      err,
-	})
-	tl.consoleLogger.Log(fmt.Sprintf("%s 失败: %v", stepName, err))
+func (tl *TaskLogger) appendLine(line string) {
+	tl.lines = append(tl.lines, line)
+	tl.lastEventTime = time.Now()
+	fmt.Println(line)
 }

@@ -58,121 +58,150 @@ func (c *TaskHolder) BackupTask() {
 }
 
 func (c *TaskHolder) cleanHistory() error {
-	return c.logger.ExecuteStep("清理历史文件", func() error {
-		deleted, err := c.ossClient.DeleteObjectsByPredicate(func(key string) bool {
-			return utils.IsNeedDeleteFile(c.ID, key)
-		})
-		if err != nil {
-			c.logger.LogError(err, "删除失败")
-			return err
-		}
+	const stageName = "清理历史文件"
+	c.logger.StartStage(stageName)
 
-		if len(deleted) == 0 {
-			c.logger.LogInfo("无需删除文件")
-			return nil
-		}
-
-		c.logger.LogInfo("成功删除：%v个文件", deleted)
-		return nil
+	deleted, err := c.ossClient.DeleteObjectsByPredicate(func(key string) bool {
+		return utils.IsNeedDeleteFile(c.ID, key)
 	})
+	if err != nil {
+		c.logger.LogError(err, "删除失败")
+		c.logger.FailStage(stageName, err)
+		return err
+	}
+
+	if len(deleted) == 0 {
+		c.logger.LogInfo("无需删除文件")
+		c.logger.FinishStage(stageName)
+		return nil
+	}
+
+	c.logger.LogInfo("成功删除：%v个文件", deleted)
+	c.logger.FinishStage(stageName)
+	return nil
 }
 
 func (c *TaskHolder) backup() error {
+	const stageName = "备份"
 	conf := c.conf
 
-	return c.logger.ExecuteStep("备份", func() error {
-		if conf.BeforeCmd != "" {
-			if err := c.runCommandStep("执行前置命令", conf.BeforeCmd, "前置命令执行失败"); err != nil {
-				return err
-			}
+	c.logger.StartStage(stageName)
+
+	if conf.BeforeCmd != "" {
+		if err := c.runCommandStep("执行前置命令", conf.BeforeCmd, "前置命令执行失败"); err != nil {
+			c.logger.FailStage(stageName, err)
+			return err
+		}
+	}
+
+	prepared, err := exporter.Prepare(c.ID, conf, c.logger)
+	if err != nil {
+		c.logger.FailStage(stageName, err)
+		return err
+	}
+	defer func() {
+		const cleanupStageName = "清理临时文件"
+
+		c.logger.StartStage(cleanupStageName)
+		if cleanupErr := prepared.Cleanup(); cleanupErr != nil {
+			c.logger.LogError(cleanupErr, "清理临时文件失败")
+			c.logger.FailStage(cleanupStageName, cleanupErr)
+		} else {
+			c.logger.FinishStage(cleanupStageName)
 		}
 
-		prepared, err := exporter.Prepare(c.ID, conf, c.logger)
+	}()
+
+	c.logger.LogInfo("备份路径: %s", prepared.Path)
+
+	zipFile, err := c.compressBackup(prepared.Path)
+	if err != nil {
+		c.logger.FailStage(stageName, err)
+		return err
+	}
+	defer func(path string) {
+		err = os.Remove(path)
 		if err != nil {
+			c.logger.LogError(err, "清理zip文件失败")
+		}
+	}(zipFile)
+
+	if conf.AfterCmd != "" {
+		if err := c.runCommandStep("执行后置命令", conf.AfterCmd, "后置命令执行失败"); err != nil {
+			c.logger.FailStage(stageName, err)
 			return err
 		}
-		defer prepared.Cleanup()
+	}
 
-		c.logger.LogInfo("备份路径: %s", prepared.Path)
+	if err := c.uploadBackup(zipFile); err != nil {
+		c.logger.FailStage(stageName, err)
+		return err
+	}
 
-		zipFile, err := c.compressBackup(prepared.Path)
-		if err != nil {
-			return err
-		}
-		defer os.Remove(zipFile)
-
-		if conf.AfterCmd != "" {
-			if err := c.runCommandStep("执行后置命令", conf.AfterCmd, "后置命令执行失败"); err != nil {
-				return err
-			}
-		}
-
-		if err := c.uploadBackup(zipFile); err != nil {
-			return err
-		}
-
-		return nil
-	})
+	c.logger.FinishStage(stageName)
+	return nil
 }
 
 func (c *TaskHolder) runCommandStep(stepName string, command string, errorMessage string) error {
-	return c.logger.ExecuteStep(stepName, func() error {
-		c.logger.LogInfo("命令: %s", command)
+	c.logger.StartStage(stepName)
+	c.logger.LogInfo("命令: %s", command)
 
-		cmd := exec.Command("bash", "-c", command)
-		if err := cmd.Run(); err != nil {
-			c.logger.LogError(err, errorMessage)
-			return err
-		}
+	cmd := exec.Command("bash", "-c", command)
+	if err := cmd.Run(); err != nil {
+		c.logger.LogError(err, errorMessage)
+		c.logger.FailStage(stepName, err)
+		return err
+	}
 
-		return nil
-	})
+	c.logger.FinishStage(stepName)
+	return nil
 }
 
 func (c *TaskHolder) compressBackup(path string) (string, error) {
-	var zipFile string
+	const stageName = "压缩文件"
+	c.logger.StartStage(stageName)
 
-	err := c.logger.ExecuteStep("压缩文件", func() error {
-		var err error
-		zipFile, err = utils.ZipPath(path, utils.GetFileName(c.ID), func(filePath string, processed, total int64, percentage float64) {
-			c.logger.LogProgress(filePath, processed, total, percentage)
-		}, func(total int64) {
-			c.logger.LogCompressed(total)
-		})
-		if err != nil {
-			c.logger.LogError(err, "压缩失败")
-			return err
-		}
-
-		return nil
+	zipFile, err := utils.ZipPath(path, utils.GetFileName(c.ID), func(filePath string, processed, total int64, percentage float64) {
+		c.logger.LogProgress(filePath, processed, total, percentage)
+	}, func(total int64) {
+		c.logger.LogCompressed(total)
 	})
+	if err != nil {
+		c.logger.LogError(err, "压缩失败")
+		c.logger.FailStage(stageName, err)
+		return "", err
+	}
 
-	return zipFile, err
+	c.logger.FinishStage(stageName)
+	return zipFile, nil
 }
 
 func (c *TaskHolder) uploadBackup(zipFile string) error {
+	const stageName = "上传到OSS"
 	objKey := filepath.Base(zipFile)
 	ossClient := c.ossClient
 
-	return c.logger.ExecuteStep("上传到OSS", func() error {
-		c.logger.LogInfo("文件: %s", objKey)
+	c.logger.StartStage(stageName)
+	c.logger.LogInfo("文件: %s", objKey)
 
-		bt, err := ossClient.Upload(objKey, zipFile)
-		if ossClient.HasError(err) {
-			c.logger.LogInfo("使用 %s 上传失败，原因: %v", bt, err)
-			return err
-		}
+	bt, err := ossClient.Upload(objKey, zipFile)
+	if ossClient.HasError(err) {
+		c.logger.LogInfo("使用 %s 上传失败，原因: %v", bt, err)
+		c.logger.FailStage(stageName, err)
+		return err
+	}
 
-		if ossClient.HasCoolDownError(err) {
-			c.logger.LogInfo("上传失败，原因：上传因冷却期延迟: %s", objKey)
-			return nil
-		}
-
-		c.logger.LogUpload(ossClient.BucketName(), objKey)
+	if ossClient.HasCoolDownError(err) {
+		c.logger.LogInfo("上传失败，原因：上传因冷却期延迟: %s", objKey)
+		c.logger.FinishStage(stageName)
 		return nil
-	})
+	}
+
+	c.logger.LogUpload(ossClient.BucketName(), objKey)
+	c.logger.FinishStage(stageName)
+	return nil
 }
 
 func (c *TaskHolder) sendMessages() {
-	c.noticeManager.NoticeEntries(c.ID, c.logger.GetStartTime(), c.logger.GetEntries())
+	c.noticeManager.NoticeSummary(c.logger.Summary())
 }

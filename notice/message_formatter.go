@@ -23,108 +23,7 @@ func newFormatter(formatType FormatType) formatter {
 	return formatter{formatType: formatType}
 }
 
-type uploadInfo struct {
-	bucket string
-	key    string
-}
-
-type taskSummary struct {
-	taskID         string
-	statusIcon     string
-	statusText     string
-	duration       time.Duration
-	stepCount      int
-	errorCount     int
-	compressedSize string
-	uploads        []uploadInfo
-	firstError     string
-}
-
-type taskStats struct {
-	hasErrors      bool
-	errorCount     int
-	stepCount      int
-	compressedSize string
-	uploads        []uploadInfo
-	firstError     string
-}
-
-func buildTaskSummary(taskID string, startTime time.Time, entries []LogEntry) taskSummary {
-	stats := buildTaskStats(entries)
-	return taskSummary{
-		taskID:         taskID,
-		statusIcon:     statusIcon(stats.hasErrors),
-		statusText:     statusText(stats.hasErrors),
-		duration:       calculateDuration(startTime, entries),
-		stepCount:      stats.stepCount,
-		errorCount:     stats.errorCount,
-		compressedSize: stats.compressedSize,
-		uploads:        stats.uploads,
-		firstError:     stats.firstError,
-	}
-}
-
-func buildTaskStats(entries []LogEntry) taskStats {
-	stats := taskStats{
-		uploads: make([]uploadInfo, 0),
-	}
-
-	for _, entry := range entries {
-		switch entry.EntryType {
-		case EntryTypeStep:
-			stats.stepCount++
-			if entry.StepStatus == StepStatusFailed {
-				stats.hasErrors = true
-				stats.errorCount++
-				if stats.firstError == "" {
-					stats.firstError = firstErrorMessage(entry)
-				}
-			}
-		case EntryTypeError:
-			stats.hasErrors = true
-			stats.errorCount++
-			if stats.firstError == "" {
-				stats.firstError = firstErrorMessage(entry)
-			}
-		case EntryTypeCompressed:
-			if entry.CompressedSize != "" {
-				stats.compressedSize = entry.CompressedSize
-			}
-		case EntryTypeUpload:
-			if entry.UploadKey == "" {
-				continue
-			}
-
-			bucket := entry.UploadBucket
-			if bucket == "" {
-				bucket = "OSS"
-			}
-
-			stats.uploads = append(stats.uploads, uploadInfo{
-				bucket: bucket,
-				key:    entry.UploadKey,
-			})
-		}
-	}
-
-	return stats
-}
-
-func firstErrorMessage(entry LogEntry) string {
-	if entry.Message != "" {
-		return entry.Message
-	}
-	if entry.Error != nil {
-		return entry.Error.Error()
-	}
-	return ""
-}
-
-func (f formatter) Format(taskID string, startTime time.Time, entries []LogEntry) string {
-	return f.FormatSummary(buildTaskSummary(taskID, startTime, entries))
-}
-
-func (f formatter) FormatSummary(summary taskSummary) string {
+func (f formatter) FormatSummary(summary TaskSummary) string {
 	var builder strings.Builder
 
 	switch f.formatType {
@@ -139,67 +38,64 @@ func (f formatter) FormatSummary(summary taskSummary) string {
 	return builder.String()
 }
 
-func renderPlain(builder *strings.Builder, summary taskSummary) {
-	writeLine(builder, "📦 备份任务: %s", summary.taskID)
-	writeLine(builder, "%s 状态: %s", summary.statusIcon, summary.statusText)
-	writeLine(builder, "⏱️ 耗时: %s", FormatDuration(summary.duration))
-	writeLine(builder, "📊 统计: %d个步骤 | %d个错误", summary.stepCount, summary.errorCount)
+func renderPlain(builder *strings.Builder, summary TaskSummary) {
+	writeLine(builder, "📦 备份任务: %s", summary.TaskID)
+	writeLine(builder, "%s 状态: %s", statusIcon(summary.HasErrors), statusText(summary.HasErrors))
+	writeLine(builder, "⏱️ 耗时: %s", FormatDuration(summary.Duration))
 	writeSeparator(builder)
 
-	if summary.compressedSize != "" {
-		writeLine(builder, "📦 %s", summary.compressedSize)
+	if summary.CompressedSize != "" {
+		writeLine(builder, "📦 %s", summary.CompressedSize)
 	}
 
-	for _, upload := range summary.uploads {
-		writeLine(builder, "☁️ 上传至: %s/%s", upload.bucket, upload.key)
+	for _, upload := range summary.Uploads {
+		writeLine(builder, "☁️ 上传至: %s/%s", upload.Bucket, upload.Key)
 	}
 
-	if summary.firstError != "" {
-		writeLine(builder, "❌ 错误: %s", summary.firstError)
+	if summary.FirstError != "" {
+		writeLine(builder, "❌ 错误: %s", summary.FirstError)
 	}
 }
 
-func renderMarkdown(builder *strings.Builder, summary taskSummary) {
-	writeLine(builder, "📦 **备份任务**: `%s`", summary.taskID)
-	writeLine(builder, "%s **状态**: %s", summary.statusIcon, summary.statusText)
-	writeLine(builder, "⏱️ **耗时**: %s", FormatDuration(summary.duration))
-	writeLine(builder, "📊 **统计**: %d个步骤 | %d个错误", summary.stepCount, summary.errorCount)
+func renderMarkdown(builder *strings.Builder, summary TaskSummary) {
+	writeLine(builder, "📦 **备份任务**: `%s`", summary.TaskID)
+	writeLine(builder, "%s **状态**: %s", statusIcon(summary.HasErrors), statusText(summary.HasErrors))
+	writeLine(builder, "⏱️ **耗时**: %s", FormatDuration(summary.Duration))
 	writeLine(builder, "")
 	writeLine(builder, "---")
 	writeLine(builder, "")
 
-	if summary.compressedSize != "" {
-		writeLine(builder, "📦 **压缩**: %s", summary.compressedSize)
+	if summary.CompressedSize != "" {
+		writeLine(builder, "📦 **压缩**: %s", summary.CompressedSize)
 	}
 
-	for _, upload := range summary.uploads {
-		writeLine(builder, "☁️ **上传至**: `%s/%s`", upload.bucket, upload.key)
+	for _, upload := range summary.Uploads {
+		writeLine(builder, "☁️ **上传至**: `%s/%s`", upload.Bucket, upload.Key)
 	}
 
-	if summary.firstError != "" {
+	if summary.FirstError != "" {
 		writeLine(builder, "")
-		writeLine(builder, "❌ **错误**: `%s`", summary.firstError)
+		writeLine(builder, "❌ **错误**: `%s`", summary.FirstError)
 	}
 }
 
-func renderHTML(builder *strings.Builder, summary taskSummary) {
-	writeHTMLBlock(builder, "<b>📦 备份任务:</b> <code>%s</code>", escapeHTML(summary.taskID))
-	writeHTMLBlock(builder, "%s <b>状态:</b> %s", summary.statusIcon, escapeHTML(summary.statusText))
-	writeHTMLBlock(builder, "⏱️ <b>耗时:</b> %s", escapeHTML(FormatDuration(summary.duration)))
-	writeHTMLBlock(builder, "📊 <b>统计:</b> %d个步骤 | %d个错误", summary.stepCount, summary.errorCount)
+func renderHTML(builder *strings.Builder, summary TaskSummary) {
+	writeHTMLBlock(builder, "<b>📦 备份任务:</b> <code>%s</code>", escapeHTML(summary.TaskID))
+	writeHTMLBlock(builder, "%s <b>状态:</b> %s", statusIcon(summary.HasErrors), escapeHTML(statusText(summary.HasErrors)))
+	writeHTMLBlock(builder, "⏱️ <b>耗时:</b> %s", escapeHTML(FormatDuration(summary.Duration)))
 	writeHTMLSpacer(builder)
 
-	if summary.compressedSize != "" {
-		writeHTMLBlock(builder, "📦 <b>压缩:</b> %s", escapeHTML(summary.compressedSize))
+	if summary.CompressedSize != "" {
+		writeHTMLBlock(builder, "📦 <b>压缩:</b> %s", escapeHTML(summary.CompressedSize))
 	}
 
-	for _, upload := range summary.uploads {
-		writeHTMLBlock(builder, "☁️ <b>上传至:</b> <code>%s/%s</code>", escapeHTML(upload.bucket), escapeHTML(upload.key))
+	for _, upload := range summary.Uploads {
+		writeHTMLBlock(builder, "☁️ <b>上传至:</b> <code>%s/%s</code>", escapeHTML(upload.Bucket), escapeHTML(upload.Key))
 	}
 
-	if summary.firstError != "" {
+	if summary.FirstError != "" {
 		writeHTMLSpacer(builder)
-		writeHTMLBlock(builder, "❌ <b>错误:</b> <code>%s</code>", escapeHTML(summary.firstError))
+		writeHTMLBlock(builder, "❌ <b>错误:</b> <code>%s</code>", escapeHTML(summary.FirstError))
 	}
 }
 
@@ -235,14 +131,6 @@ func statusText(hasErrors bool) string {
 		return "失败"
 	}
 	return "成功"
-}
-
-func calculateDuration(startTime time.Time, entries []LogEntry) time.Duration {
-	endTime := startTime
-	if len(entries) > 0 {
-		endTime = entries[len(entries)-1].Timestamp
-	}
-	return endTime.Sub(startTime)
 }
 
 func FormatBytes(bytes int64) string {

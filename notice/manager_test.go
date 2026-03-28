@@ -39,12 +39,12 @@ func TestNoticeManagerUsesNotifierFormats(t *testing.T) {
 	manager.AddNotifier(plainNotifier)
 	manager.AddNotifier(htmlNotifier)
 
-	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	entries := []LogEntry{
-		{EntryType: EntryTypeStep, Timestamp: start.Add(time.Second), StepName: "备份", StepStatus: StepStatusSuccess, Message: "完成: 备份"},
+	summary := TaskSummary{
+		TaskID:   "task-1",
+		Duration: 3 * time.Second,
 	}
 
-	manager.NoticeEntries("task-1", start, entries)
+	manager.NoticeSummary(summary)
 
 	if len(plainNotifier.sent) != 1 {
 		t.Fatalf("expected plain notifier to receive 1 message, got %d", len(plainNotifier.sent))

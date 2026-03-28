@@ -10,21 +10,18 @@ import (
 type PreparedData struct {
 	Path    string
 	cleanup func() error
-	logger  Logger
 }
 
 // Cleanup 清理 Prepare 阶段生成的临时备份产物。
-func (p *PreparedData) Cleanup() {
+func (p *PreparedData) Cleanup() error {
 	if p == nil || p.cleanup == nil {
-		return
+		return nil
 	}
 
-	if err := p.logger.ExecuteStep("清理临时文件", p.cleanup); err != nil {
-		p.logger.LogError(err, "清理临时文件失败")
-	}
+	return p.cleanup()
 }
 
-func newPreparedData(taskID string, logger Logger) (*PreparedData, error) {
+func newPreparedData(taskID string) (*PreparedData, error) {
 	sanitizedTaskID := sanitizeDumpFileName(taskID)
 
 	rootDir, err := os.MkdirTemp("", "backupgo-"+sanitizedTaskID+"-")
@@ -39,8 +36,7 @@ func newPreparedData(taskID string, logger Logger) (*PreparedData, error) {
 	}
 
 	return &PreparedData{
-		Path:   sourceDir,
-		logger: logger,
+		Path: sourceDir,
 		cleanup: func() error {
 			return os.RemoveAll(rootDir)
 		},

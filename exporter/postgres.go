@@ -13,29 +13,26 @@ type postgresBackupSource struct {
 }
 
 func (s postgresBackupSource) PrepareData() (*PreparedData, error) {
-	prepared, err := newPreparedData(s.taskID, s.logger)
+	prepared, err := newPreparedData(s.taskID)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.logger.ExecuteStep("导出Postgres", func() error {
-		for _, db := range s.conf.Databases {
-			targetFile := filepath.Join(prepared.Path, sanitizeDumpFileName(db)+".dump")
-			s.logger.LogInfo("导出 Postgres 数据库 %s -> %s", db, targetFile)
+	s.logger.LogInfo("开始导出 Postgres")
 
-			spec := buildPostgresDumpCommand(s.conf, db)
-			if err := runCommandToFile(spec, targetFile); err != nil {
-				s.logger.LogError(err, "Postgres 数据库 %s 导出失败", db)
-				return err
-			}
+	for _, db := range s.conf.Databases {
+		targetFile := filepath.Join(prepared.Path, sanitizeDumpFileName(db)+".dump")
+		s.logger.LogInfo("导出 Postgres 数据库 %s -> %s", db, targetFile)
+
+		spec := buildPostgresDumpCommand(s.conf, db)
+		if err := runCommandToFile(spec, targetFile); err != nil {
+			_ = prepared.Cleanup()
+			s.logger.LogError(err, "Postgres 数据库 %s 导出失败", db)
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		prepared.Cleanup()
-		return nil, err
 	}
 
+	s.logger.LogInfo("Postgres 导出完成")
 	return prepared, nil
 }
 
