@@ -24,8 +24,7 @@ notice:
 
 oss:
   bucket_name: 'bucket'
-  endpoint: 'endpoint'
-  fast_endpoint: 'fast_endpoint'
+  region: 'cn-hangzhou'
   access_key: 'access_key'
   access_key_secret: 'access_key_secret'
 
@@ -114,10 +113,10 @@ go build -o backupgo .
 
 - 顶层 `oss` 必填。
 - `bucket_name` 必填。
-- `endpoint` 必填。
+- `region` 必填。
 - `access_key` 必填。
 - `access_key_secret` 必填。
-- `fast_endpoint` 可选；不填时只使用主上传地址。
+- 上传使用阿里云 OSS Go SDK v2；普通上传走 `region`，加速上传直接使用 SDK 的 `accelerate endpoint` 能力，不需要额外配置 `endpoint` / `fast_endpoint`。
 
 **backup**
 

@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"backupgo/config"
+	"log/slog"
 	"reflect"
 	"testing"
 )
@@ -25,7 +26,7 @@ func TestNewDockerVolumeSource(t *testing.T) {
 		DockerVolume: &config.DockerVolumeBackupConfig{
 			Volume: "app-data",
 		},
-	}, nil)
+	}, slog.Default())
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}

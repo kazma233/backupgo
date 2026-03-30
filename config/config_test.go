@@ -2,8 +2,20 @@ package config
 
 import "testing"
 
+const testOSSConfig = `
+oss:
+  bucket_name: 'bucket'
+  region: 'cn-hangzhou'
+  access_key: 'access-key'
+  access_key_secret: 'access-key-secret'
+`
+
+func withTestOSSConfig(config string) []byte {
+	return []byte(testOSSConfig + config)
+}
+
 func TestParseConfigWithNoticeConfig(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 notice:
   mail:
     smtp: 'smtp.example.com'
@@ -46,7 +58,7 @@ backup:
 }
 
 func TestParseConfigWithPostgresSource(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 backup:
   - id: 'pg'
     type: 'postgres'
@@ -80,7 +92,7 @@ backup:
 }
 
 func TestParseConfigWithMongoSource(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 backup:
   - id: 'mongo'
     type: 'mongodb'
@@ -113,7 +125,7 @@ backup:
 }
 
 func TestParseConfigWithDockerVolumeSource(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 backup:
   - id: 'docker-volume'
     docker_volume:
@@ -144,7 +156,7 @@ backup:
 }
 
 func TestParseConfigRejectsMultipleSources(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 backup:
   - id: 'invalid'
     type: 'postgres'
@@ -160,7 +172,7 @@ backup:
 }
 
 func TestParseConfigRejectsDockerVolumeWithoutVolume(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 backup:
   - id: 'docker-volume'
     type: 'docker_volume'
@@ -174,7 +186,7 @@ backup:
 }
 
 func TestParseConfigRejectsDuplicateIDs(t *testing.T) {
-	configBlob := []byte(`
+	configBlob := withTestOSSConfig(`
 backup:
   - id: 'dup'
     backup_path: './export-a'
@@ -184,5 +196,33 @@ backup:
 
 	if _, err := ParseConfig(configBlob); err == nil {
 		t.Fatal("expected ParseConfig to fail for duplicate ids")
+	}
+}
+
+func TestParseConfigRejectsMissingOSSConfig(t *testing.T) {
+	configBlob := []byte(`
+backup:
+  - id: 'app'
+    backup_path: './export'
+`)
+
+	if _, err := ParseConfig(configBlob); err == nil {
+		t.Fatal("expected ParseConfig to fail for missing oss config")
+	}
+}
+
+func TestParseConfigRejectsOSSWithoutRegion(t *testing.T) {
+	configBlob := []byte(`
+oss:
+  bucket_name: 'bucket'
+  access_key: 'access-key'
+  access_key_secret: 'access-key-secret'
+backup:
+  - id: 'app'
+    backup_path: './export'
+`)
+
+	if _, err := ParseConfig(configBlob); err == nil {
+		t.Fatal("expected ParseConfig to fail for missing oss region")
 	}
 }

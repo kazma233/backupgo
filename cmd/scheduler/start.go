@@ -63,16 +63,15 @@ func runForeground() error {
 
 	cronScheduler = cron.New(cron.WithParser(cron.NewParser(
 		cron.Second|cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.DowOptional|cron.Descriptor,
-	)), cron.WithChain())
+	)), cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)))
 
 	for _, conf := range config.Config.BackupConf {
-		holder := task.NewTaskHolder(conf, ossClient, noticeManager)
-
 		backupTaskCron := conf.BackupTask
 		if backupTaskCron == "" {
 			backupTaskCron = "0 25 0 * * ?"
 		}
 		_, err := cronScheduler.AddFunc(backupTaskCron, func() {
+			holder := task.NewTaskHolder(conf, ossClient, noticeManager)
 			holder.BackupTask()
 		})
 		if err != nil {

@@ -32,8 +32,8 @@ func (m *NoticeManager) AddNotifier(n Notifier) {
 	m.notifiers = append(m.notifiers, n)
 }
 
-// NoticeSummary 根据任务摘要发送格式化的消息
-func (m *NoticeManager) NoticeSummary(summary TaskSummary) {
+// NoticeReport 根据任务报告发送格式化的消息
+func (m *NoticeManager) NoticeReport(report TaskReport) {
 	messages := make(map[FormatType]string)
 
 	for _, n := range m.notifiers {
@@ -44,7 +44,7 @@ func (m *NoticeManager) NoticeSummary(summary TaskSummary) {
 		formatType := n.GetFormatType()
 		msg, ok := messages[formatType]
 		if !ok {
-			msg = newFormatter(formatType).FormatSummary(summary)
+			msg = newFormatter(formatType).FormatReport(report)
 			messages[formatType] = msg
 		}
 

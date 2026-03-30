@@ -39,12 +39,12 @@ func TestNoticeManagerUsesNotifierFormats(t *testing.T) {
 	manager.AddNotifier(plainNotifier)
 	manager.AddNotifier(htmlNotifier)
 
-	summary := TaskSummary{
+	report := TaskReport{
 		TaskID:   "task-1",
 		Duration: 3 * time.Second,
 	}
 
-	manager.NoticeSummary(summary)
+	manager.NoticeReport(report)
 
 	if len(plainNotifier.sent) != 1 {
 		t.Fatalf("expected plain notifier to receive 1 message, got %d", len(plainNotifier.sent))

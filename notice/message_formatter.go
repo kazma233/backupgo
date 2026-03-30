@@ -23,84 +23,126 @@ func newFormatter(formatType FormatType) formatter {
 	return formatter{formatType: formatType}
 }
 
-func (f formatter) FormatSummary(summary TaskSummary) string {
+func (f formatter) FormatReport(report TaskReport) string {
 	var builder strings.Builder
 
 	switch f.formatType {
 	case FormatTypeMarkdown:
-		renderMarkdown(&builder, summary)
+		renderMarkdown(&builder, report)
 	case FormatTypeHTML:
-		renderHTML(&builder, summary)
+		renderHTML(&builder, report)
 	default:
-		renderPlain(&builder, summary)
+		renderPlain(&builder, report)
 	}
 
 	return builder.String()
 }
 
-func renderPlain(builder *strings.Builder, summary TaskSummary) {
-	writeLine(builder, "📦 备份任务: %s", summary.TaskID)
-	writeLine(builder, "%s 状态: %s", statusIcon(summary.HasErrors), statusText(summary.HasErrors))
-	writeLine(builder, "⏱️ 耗时: %s", FormatDuration(summary.Duration))
+func renderPlain(builder *strings.Builder, report TaskReport) {
+	writeLine(builder, "📦 备份任务: %s", report.TaskID)
+	writeLine(builder, "%s 状态: %s", statusIcon(report.HasErrors), statusText(report.HasErrors))
+	writeLine(builder, "⏱️ 耗时: %s", FormatDuration(report.Duration))
 	writeSeparator(builder)
 
-	if summary.CompressedSize != "" {
-		writeLine(builder, "📦 %s", summary.CompressedSize)
+	if report.CompressedSize != "" {
+		writeLine(builder, "📦 %s", report.CompressedSize)
 	}
 
-	for _, upload := range summary.Uploads {
-		writeLine(builder, "☁️ 上传至: %s/%s", upload.Bucket, upload.Key)
+	for _, upload := range report.Uploads {
+		writePlainUpload(builder, upload)
 	}
 
-	if summary.FirstError != "" {
-		writeLine(builder, "❌ 错误: %s", summary.FirstError)
+	if report.FirstError != "" {
+		writeLine(builder, "❌ 错误: %s", report.FirstError)
 	}
 }
 
-func renderMarkdown(builder *strings.Builder, summary TaskSummary) {
-	writeLine(builder, "📦 **备份任务**: `%s`", summary.TaskID)
-	writeLine(builder, "%s **状态**: %s", statusIcon(summary.HasErrors), statusText(summary.HasErrors))
-	writeLine(builder, "⏱️ **耗时**: %s", FormatDuration(summary.Duration))
+func renderMarkdown(builder *strings.Builder, report TaskReport) {
+	writeLine(builder, "📦 **备份任务**: `%s`", report.TaskID)
+	writeLine(builder, "%s **状态**: %s", statusIcon(report.HasErrors), statusText(report.HasErrors))
+	writeLine(builder, "⏱️ **耗时**: %s", FormatDuration(report.Duration))
 	writeLine(builder, "")
 	writeLine(builder, "---")
 	writeLine(builder, "")
 
-	if summary.CompressedSize != "" {
-		writeLine(builder, "📦 **压缩**: %s", summary.CompressedSize)
+	if report.CompressedSize != "" {
+		writeLine(builder, "📦 **压缩**: %s", report.CompressedSize)
 	}
 
-	for _, upload := range summary.Uploads {
-		writeLine(builder, "☁️ **上传至**: `%s/%s`", upload.Bucket, upload.Key)
+	for _, upload := range report.Uploads {
+		writeMarkdownUpload(builder, upload)
 	}
 
-	if summary.FirstError != "" {
+	if report.FirstError != "" {
 		writeLine(builder, "")
-		writeLine(builder, "❌ **错误**: `%s`", summary.FirstError)
+		writeLine(builder, "❌ **错误**: `%s`", report.FirstError)
 	}
 }
 
-func renderHTML(builder *strings.Builder, summary TaskSummary) {
-	writeHTMLBlock(builder, "<b>📦 备份任务:</b> <code>%s</code>", escapeHTML(summary.TaskID))
-	writeHTMLBlock(builder, "%s <b>状态:</b> %s", statusIcon(summary.HasErrors), escapeHTML(statusText(summary.HasErrors)))
-	writeHTMLBlock(builder, "⏱️ <b>耗时:</b> %s", escapeHTML(FormatDuration(summary.Duration)))
+func renderHTML(builder *strings.Builder, report TaskReport) {
+	writeHTMLBlock(builder, "<b>📦 备份任务:</b> <code>%s</code>", escapeHTML(report.TaskID))
+	writeHTMLBlock(builder, "%s <b>状态:</b> %s", statusIcon(report.HasErrors), escapeHTML(statusText(report.HasErrors)))
+	writeHTMLBlock(builder, "⏱️ <b>耗时:</b> %s", escapeHTML(FormatDuration(report.Duration)))
 	writeHTMLSpacer(builder)
 
-	if summary.CompressedSize != "" {
-		writeHTMLBlock(builder, "📦 <b>压缩:</b> %s", escapeHTML(summary.CompressedSize))
+	if report.CompressedSize != "" {
+		writeHTMLBlock(builder, "📦 <b>压缩:</b> %s", escapeHTML(report.CompressedSize))
 	}
 
-	for _, upload := range summary.Uploads {
-		writeHTMLBlock(builder, "☁️ <b>上传至:</b> <code>%s/%s</code>", escapeHTML(upload.Bucket), escapeHTML(upload.Key))
+	for _, upload := range report.Uploads {
+		writeHTMLUpload(builder, upload)
 	}
 
-	if summary.FirstError != "" {
+	if report.FirstError != "" {
 		writeHTMLSpacer(builder)
-		writeHTMLBlock(builder, "❌ <b>错误:</b> <code>%s</code>", escapeHTML(summary.FirstError))
+		writeHTMLBlock(builder, "❌ <b>错误:</b> <code>%s</code>", escapeHTML(report.FirstError))
 	}
 }
 
 func writeLine(builder *strings.Builder, format string, args ...interface{}) {
 	fmt.Fprintf(builder, format+"\n", args...)
+}
+
+func writePlainUpload(builder *strings.Builder, upload UploadReport) {
+	path := upload.ObjectPath()
+	if upload.Status == UploadStatusFailed {
+		if upload.Reason != "" {
+			writeLine(builder, "☁️ 上传失败: %s (%s)", path, upload.Reason)
+			return
+		}
+		writeLine(builder, "☁️ 上传失败: %s", path)
+		return
+	}
+
+	writeLine(builder, "☁️ 对象路径: %s", path)
+}
+
+func writeMarkdownUpload(builder *strings.Builder, upload UploadReport) {
+	path := upload.ObjectPath()
+	if upload.Status == UploadStatusFailed {
+		if upload.Reason != "" {
+			writeLine(builder, "☁️ **上传失败**: `%s` (`%s`)", path, upload.Reason)
+			return
+		}
+		writeLine(builder, "☁️ **上传失败**: `%s`", path)
+		return
+	}
+
+	writeLine(builder, "☁️ **对象路径**: `%s`", path)
+}
+
+func writeHTMLUpload(builder *strings.Builder, upload UploadReport) {
+	path := escapeHTML(upload.ObjectPath())
+	if upload.Status == UploadStatusFailed {
+		if upload.Reason != "" {
+			writeHTMLBlock(builder, "☁️ <b>上传失败:</b> <code>%s</code> (<code>%s</code>)", path, escapeHTML(upload.Reason))
+			return
+		}
+		writeHTMLBlock(builder, "☁️ <b>上传失败:</b> <code>%s</code>", path)
+		return
+	}
+
+	writeHTMLBlock(builder, "☁️ <b>对象路径:</b> <code>%s</code>", path)
 }
 
 func writeHTMLBlock(builder *strings.Builder, format string, args ...interface{}) {

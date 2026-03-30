@@ -4,17 +4,25 @@ import (
 	"backupgo/config"
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
-var ErrCoolDown = errors.New("fast upload cool down")
+var ErrCoolDown = errors.New("加速上传冷却中")
 
 type (
 	BucketType string
+
+	UploadResult struct {
+		Bucket string
+		Key    string
+		Mode   BucketType
+	}
 
 	OssClient struct {
 		bucketName      string
@@ -30,47 +38,65 @@ var (
 )
 
 func CreateOSSClient(cfg config.OssConfig) *OssClient {
-	client := oss.NewClient(oss.LoadDefaultConfig().
-		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret)).
-		WithRegion(cfg.Region))
-
-	fastClient := oss.NewClient(oss.LoadDefaultConfig().
-		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret)).
-		WithRegion(cfg.Region).
-		WithUseAccelerateEndpoint(true))
+	client := oss.NewClient(newClientConfig(cfg, false))
+	fastClient := oss.NewClient(newClientConfig(cfg, true))
 
 	oc := &OssClient{
 		client:     client,
 		fastClient: fastClient,
-		bucketName: cfg.BucketName,
+		bucketName: strings.TrimSpace(cfg.BucketName),
 	}
 
-	log.Printf("oss client init done: bucket %s", cfg.BucketName)
+	log.Printf("oss client init done: bucket %s", oc.bucketName)
 
 	return oc
+}
+
+func newClientConfig(cfg config.OssConfig, useFastEndpoint bool) *oss.Config {
+	clientConfig := oss.LoadDefaultConfig().
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.AccessKeySecret))
+	region := strings.TrimSpace(cfg.Region)
+
+	if region != "" {
+		clientConfig.WithRegion(region)
+	}
+	if useFastEndpoint {
+		clientConfig.WithUseAccelerateEndpoint(true)
+	}
+
+	return clientConfig
 }
 
 func (oc *OssClient) BucketName() string {
 	return oc.bucketName
 }
 
-func (oc *OssClient) Upload(objKey, filePath string) (BucketType, error) {
+func (oc *OssClient) Upload(objKey, filePath string) (UploadResult, error) {
+	result := UploadResult{
+		Bucket: oc.bucketName,
+		Key:    objKey,
+		Mode:   NORMAL,
+	}
+
 	err := upload(oc.client, oc.bucketName, objKey, filePath)
 	if err == nil {
 		oc.setLastSuccessTime()
-		return NORMAL, nil
+		return result, nil
 	}
+	normalErr := err
 
 	if !oc.canUseFastBucket() {
-		return NORMAL, ErrCoolDown
+		return result, fmt.Errorf("普通上传失败: %v；%w", normalErr, ErrCoolDown)
 	}
 
+	result.Mode = FAST
 	err = upload(oc.fastClient, oc.bucketName, objKey, filePath)
 	if err == nil {
 		oc.setLastSuccessTime()
+		return result, nil
 	}
 
-	return FAST, err
+	return result, fmt.Errorf("普通上传失败: %v；加速上传失败: %w", normalErr, err)
 }
 
 func upload(client *oss.Client, bucketName, objKey, filePath string) error {
@@ -80,14 +106,6 @@ func upload(client *oss.Client, bucketName, objKey, filePath string) error {
 	}, filePath)
 
 	return err
-}
-
-func (oc *OssClient) HasError(err error) bool {
-	return err != nil && err != ErrCoolDown
-}
-
-func (oc *OssClient) HasCoolDownError(err error) bool {
-	return err == ErrCoolDown
 }
 
 func (oc *OssClient) canUseFastBucket() bool {

@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"log/slog"
 	"path/filepath"
 
 	"backupgo/config"
@@ -8,7 +9,7 @@ import (
 
 type postgresBackupSource struct {
 	taskID string
-	logger Logger
+	logger *slog.Logger
 	conf   config.PostgresBackupConfig
 }
 
@@ -18,21 +19,21 @@ func (s postgresBackupSource) PrepareData() (*PreparedData, error) {
 		return nil, err
 	}
 
-	s.logger.LogInfo("开始导出 Postgres")
+	s.logger.Info("postgres export started")
 
 	for _, db := range s.conf.Databases {
 		targetFile := filepath.Join(prepared.Path, sanitizeDumpFileName(db)+".dump")
-		s.logger.LogInfo("导出 Postgres 数据库 %s -> %s", db, targetFile)
+		s.logger.Info("postgres database export started", "database", db, "target_file", targetFile)
 
 		spec := buildPostgresDumpCommand(s.conf, db)
 		if err := runCommandToFile(spec, targetFile); err != nil {
 			_ = prepared.Cleanup()
-			s.logger.LogError(err, "Postgres 数据库 %s 导出失败", db)
+			s.logger.Error("postgres database export failed", "database", db, "error", err)
 			return nil, err
 		}
 	}
 
-	s.logger.LogInfo("Postgres 导出完成")
+	s.logger.Info("postgres export completed")
 	return prepared, nil
 }
 

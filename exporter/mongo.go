@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"log/slog"
 	"path/filepath"
 
 	"backupgo/config"
@@ -8,7 +9,7 @@ import (
 
 type mongoBackupSource struct {
 	taskID string
-	logger Logger
+	logger *slog.Logger
 	conf   config.MongoBackupConfig
 }
 
@@ -18,21 +19,21 @@ func (s mongoBackupSource) PrepareData() (*PreparedData, error) {
 		return nil, err
 	}
 
-	s.logger.LogInfo("开始导出 MongoDB")
+	s.logger.Info("mongodb export started")
 
 	for _, db := range s.conf.Databases {
 		targetFile := filepath.Join(prepared.Path, mongoArchiveFileName(db, s.conf.Gzip))
-		s.logger.LogInfo("导出 MongoDB 数据库 %s -> %s", db, targetFile)
+		s.logger.Info("mongodb database export started", "database", db, "target_file", targetFile)
 
 		spec := buildMongoDumpCommand(s.conf, db)
 		if err := runCommandToFile(spec, targetFile); err != nil {
 			_ = prepared.Cleanup()
-			s.logger.LogError(err, "MongoDB 数据库 %s 导出失败", db)
+			s.logger.Error("mongodb database export failed", "database", db, "error", err)
 			return nil, err
 		}
 	}
 
-	s.logger.LogInfo("MongoDB 导出完成")
+	s.logger.Info("mongodb export completed")
 	return prepared, nil
 }
 

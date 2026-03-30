@@ -103,6 +103,23 @@ func (c BackupConfig) GetID() string {
 	return strings.TrimSpace(c.ID)
 }
 
+func (c OssConfig) Validate() error {
+	if strings.TrimSpace(c.BucketName) == "" {
+		return errors.New("oss.bucket_name can not be empty")
+	}
+	if strings.TrimSpace(c.AccessKey) == "" {
+		return errors.New("oss.access_key can not be empty")
+	}
+	if strings.TrimSpace(c.AccessKeySecret) == "" {
+		return errors.New("oss.access_key_secret can not be empty")
+	}
+	if strings.TrimSpace(c.Region) == "" {
+		return errors.New("oss.region can not be empty")
+	}
+
+	return nil
+}
+
 func (c BackupConfig) GetType() string {
 	if normalized := strings.ToLower(strings.TrimSpace(c.Type)); normalized != "" {
 		return normalized
@@ -291,6 +308,9 @@ func ParseConfig(configBlob []byte) (GlobalConfig, error) {
 
 	if len(config.BackupConf) <= 0 {
 		return GlobalConfig{}, errors.New("config can not be empty")
+	}
+	if err := config.OSS.Validate(); err != nil {
+		return GlobalConfig{}, err
 	}
 
 	seenIDs := make(map[string]struct{}, len(config.BackupConf))

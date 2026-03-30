@@ -1,12 +1,14 @@
 package exporter
 
+import "log/slog"
+
 type pathSource struct {
 	taskID string
-	logger Logger
+	logger *slog.Logger
 	path   string
 }
 
 func (s pathSource) PrepareData() (*PreparedData, error) {
-	s.logger.LogInfo("使用目录备份源: %s", s.path)
+	s.logger.Info("using path backup source", "path", s.path)
 	return &PreparedData{Path: s.path}, nil
 }
