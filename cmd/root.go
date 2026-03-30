@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 
+	"backupgo/cmd/logs"
 	"github.com/urfave/cli/v3"
 
 	"backupgo/cmd/backup"
@@ -18,6 +19,7 @@ func Run(args []string) error {
 			scheduler.StartCommand(),
 			scheduler.StopCommand(),
 			status.StatusCommand(),
+			logs.LogsCommand(),
 			backup.BackupCommand(),
 		},
 	}
