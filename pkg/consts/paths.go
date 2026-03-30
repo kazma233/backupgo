@@ -46,6 +46,15 @@ func LogFilePath() (string, error) {
 	return filepath.Join(dir, LogFileName), nil
 }
 
+func LogBackupFilePath() (string, error) {
+	dir, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(dir, LogBackupFileName), nil
+}
+
 func StateFilePath() (string, error) {
 	dir, err := StateDir()
 	if err != nil {

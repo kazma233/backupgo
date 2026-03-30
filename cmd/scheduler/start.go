@@ -114,6 +114,15 @@ func runDetached() error {
 		return err
 	}
 
+	logBackupFilePath, err := consts.LogBackupFilePath()
+	if err != nil {
+		return err
+	}
+
+	if err := rotateLogFile(logFilePath, logBackupFilePath); err != nil {
+		return err
+	}
+
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("open log file failed: %w", err)
