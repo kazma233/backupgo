@@ -2,9 +2,7 @@ package logs
 
 import (
 	"backupgo/pkg/consts"
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +11,7 @@ import (
 )
 
 const defaultLogLines = 100
+const tailReadBlockSize int64 = 4096
 
 func LogsCommand() *cli.Command {
 	return &cli.Command{
@@ -52,64 +51,74 @@ func copyLogTail(output io.Writer, logFilePath string, lineCount int) error {
 	}
 	defer logFile.Close()
 
-	lines, err := tailLinesFromReader(logFile, lineCount)
+	if lineCount == 0 {
+		return nil
+	}
+
+	startOffset, err := findTailStartOffset(logFile, lineCount)
 	if err != nil {
 		return fmt.Errorf("read log file %s failed: %w", logFilePath, err)
 	}
 
-	for _, line := range lines {
-		if _, err := io.WriteString(output, line); err != nil {
-			return fmt.Errorf("write log output failed: %w", err)
-		}
+	if _, err := logFile.Seek(startOffset, io.SeekStart); err != nil {
+		return fmt.Errorf("seek log file %s failed: %w", logFilePath, err)
+	}
+
+	if _, err := io.Copy(output, logFile); err != nil {
+		return fmt.Errorf("write log output failed: %w", err)
 	}
 
 	return nil
 }
 
-func tailLinesFromReader(input io.Reader, lineCount int) ([]string, error) {
-	if lineCount == 0 {
-		return nil, nil
+func findTailStartOffset(file *os.File, lineCount int) (int64, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
 	}
 
-	reader := bufio.NewReader(input)
-	ring := make([]string, lineCount)
-	total := 0
+	fileSize := info.Size()
+	if fileSize == 0 || lineCount <= 0 {
+		return 0, nil
+	}
 
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if line != "" {
-					ring[total%lineCount] = line
-					total++
-				}
-				break
-			}
-			return nil, err
+	scanEnd := fileSize
+	lastByte := make([]byte, 1)
+	if _, err := file.ReadAt(lastByte, fileSize-1); err != nil {
+		return 0, err
+	}
+	if lastByte[0] == '\n' {
+		scanEnd--
+	}
+
+	newlineCount := 0
+	buffer := make([]byte, tailReadBlockSize)
+
+	for offset := scanEnd; offset > 0; {
+		readSize := tailReadBlockSize
+		if offset < readSize {
+			readSize = offset
 		}
 
-		ring[total%lineCount] = line
-		total++
+		start := offset - readSize
+		chunk := buffer[:readSize]
+		if _, err := file.ReadAt(chunk, start); err != nil {
+			return 0, err
+		}
+
+		for i := len(chunk) - 1; i >= 0; i-- {
+			if chunk[i] != '\n' {
+				continue
+			}
+
+			newlineCount++
+			if newlineCount == lineCount {
+				return start + int64(i) + 1, nil
+			}
+		}
+
+		offset = start
 	}
 
-	if total == 0 {
-		return nil, nil
-	}
-
-	count := total
-	if count > lineCount {
-		count = lineCount
-	}
-
-	start := 0
-	if total > lineCount {
-		start = total % lineCount
-	}
-
-	lines := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		lines = append(lines, ring[(start+i)%lineCount])
-	}
-
-	return lines, nil
+	return 0, nil
 }

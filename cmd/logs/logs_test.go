@@ -2,9 +2,9 @@ package logs
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -46,7 +46,7 @@ func TestCopyLogTailMissing(t *testing.T) {
 	}
 }
 
-func TestTailLinesFromReader(t *testing.T) {
+func TestCopyLogTailCases(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -86,14 +86,53 @@ func TestTailLinesFromReader(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := tailLinesFromReader(strings.NewReader(tt.input), tt.lineCount)
-			if err != nil {
-				t.Fatalf("tailLinesFromReader() error = %v", err)
+			tempDir := t.TempDir()
+			logFilePath := filepath.Join(tempDir, "backupgo.log")
+			if err := os.WriteFile(logFilePath, []byte(tt.input), 0644); err != nil {
+				t.Fatalf("write log file failed: %v", err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("tailLinesFromReader() = %#v, want %#v", got, tt.want)
+
+			var output bytes.Buffer
+			if err := copyLogTail(&output, logFilePath, tt.lineCount); err != nil {
+				t.Fatalf("copyLogTail() error = %v", err)
+			}
+
+			got := output.String()
+			want := strings.Join(tt.want, "")
+			if got != want {
+				t.Fatalf("copyLogTail() = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestCopyLogTailAcrossBlocks(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	logFilePath := filepath.Join(tempDir, "backupgo.log")
+
+	var content strings.Builder
+	var want strings.Builder
+	for i := 0; i < 300; i++ {
+		line := fmt.Sprintf("line-%03d %s\n", i, strings.Repeat("x", 20))
+		content.WriteString(line)
+		if i >= 297 {
+			want.WriteString(line)
+		}
+	}
+
+	if err := os.WriteFile(logFilePath, []byte(content.String()), 0644); err != nil {
+		t.Fatalf("write log file failed: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := copyLogTail(&output, logFilePath, 3); err != nil {
+		t.Fatalf("copyLogTail() error = %v", err)
+	}
+
+	if got := output.String(); got != want.String() {
+		t.Fatalf("copyLogTail() = %q, want %q", got, want.String())
 	}
 }
 
